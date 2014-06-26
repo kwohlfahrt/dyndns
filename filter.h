@@ -18,6 +18,6 @@ struct filter {
 enum rtnetlink_groups afToRtnl(int af);
 
 bool checkFilterAf(struct filter filter, int af);
-int addFilterAf(struct filter *filter, int af);
+bool addFilterAf(struct filter *filter, int af);
 
 #endif /*_FILTER_H*/

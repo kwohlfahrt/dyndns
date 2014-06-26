@@ -83,6 +83,7 @@ bool addrEqual(const struct IPAddr addr1, const struct IPAddr addr2){
 	}
 }
 
+// Could also use `bool` return to match others in this file (but would require wrapper for webUpdate)
 int printAddr(struct IPAddr const address){
 	char ip_str[INET6_ADDRSTRLEN];
 	if (!inet_ntop(address.af, &address.addr, ip_str, sizeof(ip_str))){

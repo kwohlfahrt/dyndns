@@ -1,9 +1,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <unistd.h>
 #include <errno.h>
-#include <pthread.h>
-
 #include <resolv.h>
 extern struct __res_state _res;
 
@@ -13,7 +12,13 @@ extern struct __res_state _res;
 #define HAVE_strlcpy
 #endif
 
+#include <curl/curl.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
 #include "web_updater.h"
+#include "ipaddr.h"
 
 static char const * url_template = "";
 static size_t url_size = 0;
@@ -36,7 +41,7 @@ size_t countIpTags(const char * template){
 }
 
 // No need to copy in current use. Might change.
-void setUrl(const char * new_url){
+void setUrl(char const * const new_url){
 	url_template = new_url;
 	url_size = strlen(url_template) + 1
 	           + ( countIpTags(url_template)
@@ -44,11 +49,9 @@ void setUrl(const char * new_url){
 	return;
 }
 
-// Double check this routine.
 static char * templateUrl(struct IPAddr address, char * dst, size_t max_size){
 	char ip_str[INET6_ADDRSTRLEN];
 	if (!inet_ntop(address.af, &address.addr, ip_str, sizeof(ip_str))){
-		perror("Error converting IP to string");
 		return NULL;
 	}
 	size_t ip_len = strlen(ip_str);
@@ -63,7 +66,6 @@ static char * templateUrl(struct IPAddr address, char * dst, size_t max_size){
 		copy_len = template_pos - read_pos;
 		if ((copy_len + ip_len) > max_size){
 			errno = ENOSPC;
-			fputs("URL truncated.", stderr);
 			return NULL;
 		}
 		memcpy(write_pos, read_pos, copy_len);
@@ -76,7 +78,6 @@ static char * templateUrl(struct IPAddr address, char * dst, size_t max_size){
 	}
 	if (strlcpy(write_pos, read_pos, max_size) >= max_size){
 			errno = ENOSPC;
-			fputs("URL truncated.", stderr);
 			return NULL;
 	}
 	
@@ -89,7 +90,7 @@ static size_t discard(__attribute__((unused)) char *ptr,
 	return size * nmemb;
 }
 
-int getNameServers(struct IPAddr * const addrs, size_t const num_addrs){
+static int getNameServers(struct IPAddr * const addrs, size_t const num_addrs){
 	res_init();
 	for (int i = 0; i < _res.nscount && (size_t) i < num_addrs; ++i){
 		if (_res.nsaddr_list[i].sin_addr.s_addr == 0){
@@ -103,7 +104,7 @@ int getNameServers(struct IPAddr * const addrs, size_t const num_addrs){
 	return _res.nscount;
 }
 
-int webUpdate(struct IPAddr addr){
+int webUpdate(struct IPAddr const addr){
 	char * url;
 	CURL * curl_handle = NULL;
 	int retval = CURLE_OK;

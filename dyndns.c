@@ -6,31 +6,43 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include <curl/curl.h>
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
 #include <sys/socket.h>
 #include <net/if.h>
 
-#include <sys/mman.h>
-#include <pthread.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
 
 #include "filter.h"
-#include "dyndns.h"
+#include "ipaddr.h"
 #include "monitor.h"
 #include "web_updater.h"
 
-static const char version[] = "0.0.1";
+static char const version[] = "0.0.1";
 unsigned int verbosity = 0;
+static int const termsig = SIGQUIT;
 
-void printUsage(){
+static void printUsage(){
 	puts("dyndns -V\n"
 	     "dyndns -h\n"
 	     "dyndns [-v] [-p] [-4] [-6] interface [url]");
+}
+
+static bool childOK(int const status){
+	if (WIFEXITED(status)){
+		if (WEXITSTATUS(status) != 0) {
+			fprintf(stderr, "Processing child exited with status %d\n", WEXITSTATUS(status));
+			return false;
+		}
+	} else if (WIFSIGNALED(status)){
+		if (WTERMSIG(status) != termsig){
+			fprintf(stderr, "Processing child terminated by signal %d\n", WTERMSIG(status));
+			return false;
+		}
+	} else {
+		fputs("Processing child exited abnormally.", stderr);
+		return false;
+	}
+	return true;
 }
 
 int main(int argc, char** argv) {
@@ -101,7 +113,6 @@ int main(int argc, char** argv) {
 			iface_name, strerror(errno));
 		return EXIT_FAILURE;
 	}
-
 	
 	if (verbosity)
 		printf("Running with verbosity: %i\n", verbosity);
@@ -114,114 +125,53 @@ int main(int argc, char** argv) {
 			printf(" IPv6");
 		puts("");
 	}
-	
-	struct SharedAddr * shared_data;
-	// mmap'ed memory automatically unmaps at program exit
-	if ((shared_data = mmap(NULL, sizeof(&shared_data), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0)) == MAP_FAILED){
-		perror("Could not create shared memory");
-		return EXIT_FAILURE;
-	}
 
-	pthread_mutexattr_t mattr;
-	pthread_mutexattr_init(&mattr);
-	pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
-	pthread_mutexattr_settype(&mattr, PTHREAD_MUTEX_ERRORCHECK);
-	pthread_mutex_init(&shared_data->mutex, &mattr);
-	pthread_mutexattr_destroy(&mattr);
-	// TODO: Deal with process being killed while mutex is locked.
-	// Maybe semaphores? Block signals?
-	
-	sigset_t parent_sigmask;
-	sigemptyset(&parent_sigmask);
-	sigaddset(&parent_sigmask, SIGUSR1);
-	sigaddset(&parent_sigmask, SIGCHLD);
-
-	sigprocmask(SIG_SETMASK, &parent_sigmask, NULL);
-
-	pid_t monitor_child_pid = 0, process_child_pid = 0;
-	// TODO: Bring monitoring back into main process? Make monitorAddrs a blocking call returning a struct IPAddr
-	if ((monitor_child_pid = fork()) == -1){
-		perror("Could not fork IP monitoring process.");
+	ssize_t sock = createMonitorSocket(filter);
+	if (sock == -1){
+		perror("Couldn't create monitoring socket.");
 		goto cleanup;
-	} else if (!monitor_child_pid) {
-		sigset_t monitor_sigmask;
-		sigemptyset(&monitor_sigmask);
-
-		sigprocmask(SIG_SETMASK, &monitor_sigmask, NULL);
-		return monitorAddrs(filter, shared_data);
 	}
 
-	while (true) {
-		siginfo_t info;
-		int signal = sigwaitinfo(&parent_sigmask, &info);
-		switch (signal){
-		case SIGUSR1:
-			if ((process_child_pid = fork()) == -1){
-				perror("Could not fork IP processing process.");
-				goto cleanup;
-			} else if (!process_child_pid) {
-				// Probably better via exec now that only one address is processed at a time.
-				sigset_t process_sigmask;
-				sigemptyset(&process_sigmask);
-				sigprocmask(SIG_SETMASK, &process_sigmask, NULL);
-				
-				struct IPAddr addr;
-				pthread_mutex_lock(&shared_data->mutex);
-				addr = shared_data->addr;
-				pthread_mutex_unlock(&shared_data->mutex);
-				return addr_processor(addr);
-			}
-			break;
-		case SIGCHLD:{
-			pid_t child_pid;
-			while ((child_pid = waitpid(-1, NULL, WNOHANG))){
-				if (child_pid < 0){
-					perror("Could not get status of monitor process");
-					goto cleanup;
-				}
-				else if (child_pid == monitor_child_pid){
-					// Monitor dead.
-					goto cleanup;
-				}
-			}
-			break;
-		}
-		default:
-			// should never trigger
-			goto cleanup;
-		}
+	if (!requestAddr(filter, sock)){
+		perror("Couldn't request current address.");
+		goto cleanup;
 	}
+
+	pid_t child = -1;
+	do {
+		struct IPAddr new_addr = nextAddr(filter, sock);
+		if (child != -1){
+			// Make sure kill isn't called on first loop.
+			kill(child, termsig);
+			
+			int status;
+			if (waitpid(child, &status, 0) == -1){
+				perror("Error waiting for child");
+				break;
+			}
+			if (!childOK(status))
+				break;
+		}
+
+		if (new_addr.af == AF_MAX){
+			perror("An error occurred while waiting for a new IP");
+			break;
+		} else if (new_addr.af == AF_UNSPEC) {
+			fputs("Netlink socket closed by kernel.", stderr);
+			break;
+		}
+
+		child = fork();
+		if (child == -1){
+			perror("Could not fork to process new address.");
+			break;
+		} else if (!child){
+			close(sock);
+			return addr_processor(new_addr);
+		}
+	} while (true);
 
 cleanup:
-	puts("Cleaning up...");
-	signal(SIGTERM, SIG_IGN);
-	kill(-getpid(), SIGTERM); // SIGCHLD and SIGUSR1 are still blocked 
-	                          // POSIX guarantees at least one signal delivered before kill() returns
-	signal(SIGTERM, SIG_DFL);
-	sigprocmask(SIG_UNBLOCK, &parent_sigmask, NULL);
-
-	while (true){
-		int status;
-		pid_t child_pid = waitpid(-1, &status, 0);
-
-		char monitor_label[] = "Monitor", processing_label[] = "Processing";
-		char * child_label = (child_pid == monitor_child_pid) ? monitor_label : processing_label;
-
-		if (child_pid == -1) {
-			if (errno == ECHILD)
-				break;
-			else
-				perror("Error waiting for children.");
-		}
-
-		if (WIFEXITED(status))
-			printf("%s child exited with status %d\n", child_label, WEXITSTATUS(status));
-		else if (WIFSIGNALED(status))
-			printf("%s child terminated by signal %d\n", child_label, WTERMSIG(status));
-		else
-			printf("%s child exited abnormally.", child_label);
-	}
-
-	pthread_mutex_destroy(&shared_data->mutex);
+	close(sock);
 	return 0;
 }

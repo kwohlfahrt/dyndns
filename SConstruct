@@ -12,10 +12,6 @@ if not conf.CheckLibWithHeader('curl', 'curl/curl.h', 'c'):
 	print('Missing libcurl')
 	Exit(1)
 
-if not conf.CheckLibWithHeader('pthread', 'pthread.h', 'c'):
-	print('Missing pthread')
-	Exit(1)
-
 if not conf.CheckLibWithHeader('resolv', 'resolv.h', 'c'):
 	print('Missing resolver')
 	Exit(1)

@@ -1,55 +1,23 @@
-#include <net/if.h>
-#include <netinet/in.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <linux/if_addr.h>
-#include <arpa/inet.h>
 #include <sys/socket.h>
-#include <bits/socket.h>
 #ifndef SOL_NETLINK
 #define SOL_NETLINK 270
 #endif /*SOL_NETLINK*/
 #include <stddef.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/types.h>
-#include <pthread.h>
-#include <signal.h>
 #include <errno.h>
 
 #include "monitor.h"
-#include "dyndns.h"
 #include "filter.h"
 #include "ipaddr.h"
 
 // TODO: Make this (& filter) more versatile so can also use for route waiting
-// Probably make monitorAddr(filter, sock) a blocking call that returns an IPAddr
 
-static bool requestAddr(ssize_t sock, struct filter filter){
-	struct {
-		struct nlmsghdr nlh;
-		struct ifaddrmsg ifa;
-	} req = {
-		.nlh = {
-			.nlmsg_len= NLMSG_LENGTH(sizeof(struct ifaddrmsg)),
-			.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP,
-			.nlmsg_type = RTM_GETADDR,
-			.nlmsg_pid = getpid(),
-		}, .ifa = {
-			.ifa_family = 0, // Request all, filter later.
-			.ifa_index = filter.iface, // Does nothing as NLM_F_MATCH not implemented
-		},
-	};
-	
-	if (send(sock, &req, req.nlh.nlmsg_len, 0) < 0){
-		return false;
-	}
-
-	return true;
-}
-
-static ssize_t createMonitorSocket(struct filter const filter){
+ssize_t createMonitorSocket(struct filter const filter){
 	ssize_t sock;
 	struct sockaddr_nl addr = {
 		.nl_family = AF_NETLINK,
@@ -76,13 +44,36 @@ static ssize_t createMonitorSocket(struct filter const filter){
 		}
 	}
 	return sock;
-
 cleanup:
 	close(sock);
 	return -1;
 }
 
-static struct IPAddr processNlMsgs(const char * buf, ssize_t len, struct filter filter){
+bool requestAddr(struct filter const filter, ssize_t const sock){
+	struct {
+		struct nlmsghdr nlh;
+		struct ifaddrmsg ifa;
+	} req = {
+		.nlh = {
+			.nlmsg_len= NLMSG_LENGTH(sizeof(struct ifaddrmsg)),
+			.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP,
+			.nlmsg_type = RTM_GETADDR,
+			.nlmsg_pid = getpid(),
+		}, .ifa = {
+			.ifa_family = 0, // Request all, filter later.
+			.ifa_index = filter.iface, // Does nothing as NLM_F_MATCH not implemented
+		},
+	};
+	
+	if (send(sock, &req, req.nlh.nlmsg_len, 0) < 0){
+		return false;
+	}
+
+	return true;
+}
+
+// Returns AF_MAX if error, AF_UNSPEC if none matching
+static struct IPAddr processNlMsgs(char const * buf, ssize_t len, struct filter const filter){
 	struct IPAddr retval = {.af = AF_UNSPEC};
 
 	for (struct nlmsghdr *nlh = (struct nlmsghdr *) buf;
@@ -92,6 +83,7 @@ static struct IPAddr processNlMsgs(const char * buf, ssize_t len, struct filter 
 		case NLMSG_ERROR: {
 			struct nlmsgerr * err = (struct nlmsgerr *) NLMSG_DATA(nlh);
 			errno = -err->error;
+			retval.af = AF_MAX;
 			return retval;
 		}
 		case RTM_NEWADDR: {
@@ -138,62 +130,39 @@ static struct IPAddr processNlMsgs(const char * buf, ssize_t len, struct filter 
 	return retval;
 }
 
-int monitorAddrs(struct filter const filter, struct SharedAddr * dst){
-	char * buf = NULL;
+// Returns AF_MAX if error, AF_UNSPEC if no more addrs (socket closed)
+struct IPAddr nextAddr(struct filter const filter, ssize_t const sock){
 	size_t buf_len = 1024;
-	int retval = 0;
-	ssize_t sock;
-
-	if ((sock = createMonitorSocket(filter)) == -1)
-		return -1; // sock will not be open
-
-	if (!requestAddr(sock, filter)){
-		retval = -1;
-		goto cleanup;
-	}
+	char * buf = (char *) malloc(buf_len);
 
 	struct IPAddr addr;
 	ssize_t len;
-	buf = (char *) malloc(buf_len);
-	while ((len = recv(sock, buf, buf_len, MSG_TRUNC)) > 0){
-		if ((size_t) len > buf_len){
+	while (true){
+		len = recv(sock, buf, buf_len, MSG_TRUNC);
+		if (len == 0) {
+			addr.af = AF_UNSPEC;
+			break;
+		}
+		if (len < 0) {
+			addr.af = AF_MAX;
+			break;
+		} else if ((size_t) len > buf_len){
 			buf_len = (size_t) len;
 			buf = (char *) realloc(buf, buf_len);
-			// resynchronize (TODO clear socket?)
-			if (!requestAddr(sock, filter)){
-				retval = -1;
-				goto cleanup;
+			// clear socket if requesting current address?
+			// Resynchronize
+			if (!requestAddr(filter, sock)){
+				addr.af = AF_MAX;
+				break;
 			}
+		} else {
+			addr = processNlMsgs(buf, len, filter);
+			if (addr.af != AF_UNSPEC)
+				// Something interesting happened, return it.
+				break;
 		}
-
-		errno = 0;
-		addr = processNlMsgs(buf, len, filter);
-		if (addr.af == AF_UNSPEC){
-			if (errno != 0) {
-				retval = -1;
-				goto cleanup;
-			} else {
-				// No interesting messages
-				continue;
-			}
-		}
-
-		pthread_mutex_lock(&dst->mutex);
-		dst->addr = addr;
-		pthread_mutex_unlock(&dst->mutex);
-		kill(getppid(), SIGUSR1);
 	}
 	
-	if (len == -1){
-		if (errno == EAGAIN || errno == EWOULDBLOCK)
-			retval = 0;
-		else
-			retval = -1;
-		goto cleanup;
-	}
-	
-cleanup:
-	close(sock);
 	free(buf);
-	return retval;
+	return addr;
 }

@@ -1,14 +1,9 @@
 #ifndef _WEB_UPDATER_H
 #define _WEB_UPDATER_H
 
-#include <arpa/inet.h>
-#include <curl/curl.h>
-#include <signal.h>
-
 #include "ipaddr.h"
-#include "dyndns.h"
 
-void setUrl(const char* new_url);
-int webUpdate(struct IPAddr);
+void setUrl(char const * const new_url);
+int webUpdate(struct IPAddr const addr);
 
 #endif /*_WEB_UPDATER_H*/

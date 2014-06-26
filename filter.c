@@ -27,19 +27,20 @@ bool checkFilterAf(struct filter filter, int af){
 	return false;
 };
 
-int addFilterAf(struct filter *filter, int af){
+bool addFilterAf(struct filter *filter, int af){
 	if (filter == NULL){
 		errno = EFAULT;
-		return -1;
+		return false;
 	}
 		
 	if (checkFilterAf(*filter, af))
-		return 0;
+		return true;
 	if (filter->num_af >= sizeof(filter->af)){
 		errno = ENOSPC;
-		return -1;
+		return false;
 	}
+
 	filter->af[filter->num_af] = afToRtnl(af);
 	filter->num_af++;
-	return 0;
+	return true;
 };
