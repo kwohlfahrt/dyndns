@@ -14,7 +14,7 @@ enum rtnetlink_groups afToRtnl(int af){
 	}
 };
 
-bool checkFilterAf(struct filter filter, int af){
+bool checkFilterAf( struct AddrFilter filter, int af){
 	if (filter.af == NULL){
 		errno = EFAULT;
 		return false;
@@ -27,7 +27,7 @@ bool checkFilterAf(struct filter filter, int af){
 	return false;
 };
 
-bool addFilterAf(struct filter *filter, int af){
+bool addFilterAf( struct AddrFilter *filter, int af){
 	if (filter == NULL){
 		errno = EFAULT;
 		return false;

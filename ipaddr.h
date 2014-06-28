@@ -5,11 +5,11 @@
 #include <stdbool.h>
 
 struct IPAddr {
-	int af;
 	union {
 		struct in6_addr ipv6;
 		struct in_addr ipv4;
-	} addr;
+	}; // First so doesn't need to be named
+	unsigned char af;
 };
 
 bool addrIsPrivate(struct IPAddr const addr);

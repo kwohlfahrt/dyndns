@@ -19,17 +19,12 @@ extern struct __res_state _res;
 
 #include "web_updater.h"
 #include "ipaddr.h"
+#include "monitor.h"
+#include "filter.h"
 
 static char const * url_template = "";
 static size_t url_size = 0;
 static char const * const ip_tag = "<ipaddr>";
-
-int urlCallbackInit(void){
-	// Simple nameserver interface.
-	res_init(); // Don't know if this can fail.
-	return 0;
-}
-
 
 size_t countIpTags(const char * template){
 	size_t retval = 0;
@@ -51,7 +46,7 @@ void setUrl(char const * const new_url){
 
 static char * templateUrl(struct IPAddr address, char * dst, size_t max_size){
 	char ip_str[INET6_ADDRSTRLEN];
-	if (!inet_ntop(address.af, &address.addr, ip_str, sizeof(ip_str))){
+	if (!inet_ntop(address.af, &address, ip_str, sizeof(ip_str))){
 		return NULL;
 	}
 	size_t ip_len = strlen(ip_str);
@@ -90,26 +85,34 @@ static size_t discard(__attribute__((unused)) char *ptr,
 	return size * nmemb;
 }
 
-static int getNameServers(struct IPAddr * const addrs, size_t const num_addrs){
+int getNameServers(struct IPAddr * const dst, size_t const num_addrs){
 	res_init();
 	for (int i = 0; i < _res.nscount && (size_t) i < num_addrs; ++i){
-		if (_res.nsaddr_list[i].sin_addr.s_addr == 0){
-			addrs[i].af = AF_INET6;
-			addrs[i].addr.ipv6 = _res._u._ext.nsaddrs[i]->sin6_addr;
+		if (_res.nsaddr_list[i].sin_addr.s_addr != 0){
+			dst[i].af = AF_INET;
+			dst[i].ipv4 = _res.nsaddr_list[i].sin_addr;
+		} else if (_res._u._ext.nsaddrs[i] != NULL){
+			dst[i].af = AF_INET6;
+			dst[i].ipv6 = _res._u._ext.nsaddrs[i]->sin6_addr;
 		} else {
-			addrs[i].af = AF_INET;
-			addrs[i].addr.ipv4 = _res.nsaddr_list[i].sin_addr;
+			dst[i].af = AF_UNSPEC;
 		}
 	}
+
 	return _res.nscount;
 }
 
+// Need to clean up error handling on this.
 int webUpdate(struct IPAddr const addr){
 	char * url;
 	CURL * curl_handle = NULL;
 	int retval = CURLE_OK;
+	ssize_t sock = createRouteSocket();
 
-	if ((url = (char *) malloc(url_size)) == NULL){
+	if (sock == -1)
+		return CURLE_AGAIN;
+
+	if ((url = malloc(url_size)) == NULL){
 		retval = CURLE_OUT_OF_MEMORY;
 		goto cleanup;
 	}
@@ -130,17 +133,20 @@ int webUpdate(struct IPAddr const addr){
 	if ((retval = curl_easy_setopt(curl_handle, CURLOPT_URL, url)) != CURLE_OK)
 		goto cleanup;
 
-	/* FIXME: If the situation is ifdown->ifup there is a time between the new address
-	 * and the default route (to the DNS server), so this comes up with
-	 * CURLE_COULDNT_RESOLVE_HOST
-	 */
-	if ((retval = curl_easy_perform(curl_handle)) != CURLE_OK)
-		goto cleanup;
-	else
-		printf("Fetched URL: %s\n", url);
+	retval = curl_easy_perform(curl_handle);
+	// If interface is recently brought up, this will fail with
+	// CURLE_COULDNT_RESOLVE_HOST because NetworkManager hasn't set any routes.
+	// Could save nameserver in advance and wait for it to come back, or retry
+	// on any route that comes up.
+	goto cleanup;
 
-// FIXME: Not called if curl_easy_perform is interrupted by signal
 cleanup:
+	if (retval == CURLE_OK)
+		printf("Fetched URL: %s\n", url);
+	else
+		printf("Failed to fetch URL: %s (%s)\n", url, curl_easy_strerror(retval));
+
+	close(sock);
 	free(url);
 	curl_easy_cleanup(curl_handle);
 	return retval;

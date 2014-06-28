@@ -17,6 +17,8 @@
 #include "monitor.h"
 #include "web_updater.h"
 
+#include <arpa/inet.h>
+
 static char const version[] = "0.0.1";
 unsigned int verbosity = 0;
 static int const termsig = SIGQUIT;
@@ -46,8 +48,10 @@ static bool childOK(int const status){
 }
 
 int main(int argc, char** argv) {
-	struct filter filter = {};
+	struct AddrFilter filter = {};
 	int (* addr_processor)(struct IPAddr);
+
+	// Deal with options
 
 	const char short_opts[] = "vVh46";
 	struct option long_opts[] = {
@@ -126,16 +130,20 @@ int main(int argc, char** argv) {
 		puts("");
 	}
 
-	ssize_t sock = createMonitorSocket(filter);
+	// Prepare monitoring
+
+	ssize_t sock = createAddrSocket(filter);
 	if (sock == -1){
-		perror("Couldn't create monitoring socket.");
+		perror("Couldn't create monitoring socket");
 		goto cleanup;
 	}
 
 	if (!requestAddr(filter, sock)){
-		perror("Couldn't request current address.");
+		perror("Couldn't request current address");
 		goto cleanup;
 	}
+
+	// Main loop
 
 	pid_t child = -1;
 	do {
@@ -161,12 +169,13 @@ int main(int argc, char** argv) {
 			break;
 		}
 
+		// TODO: Could use exec
 		child = fork();
 		if (child == -1){
 			perror("Could not fork to process new address.");
 			break;
 		} else if (!child){
-			close(sock);
+			close(sock); // Make sure to set CLOEXEC if changing to exec.
 			return addr_processor(new_addr);
 		}
 	} while (true);
