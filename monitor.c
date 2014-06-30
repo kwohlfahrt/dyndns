@@ -21,17 +21,12 @@ static ssize_t createNlSocket(enum rtnetlink_groups const * const groups, size_t
 		.nl_family = AF_NETLINK,
 		// .nl_pid = 0 // kernel takes care of nl_pid if it is 0
 	};
-	struct timeval timeout = {.tv_sec = 30}; // TODO: Remove once interrupt safe.
 
 	if ((sock = socket(PF_NETLINK, SOCK_DGRAM, NETLINK_ROUTE)) == -1) {
 		return -1;
 	}
 
 	if ((bind(sock, (struct sockaddr *)&addr, sizeof(addr))) == -1) {
-		goto cleanup;
-	}
-
-	if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (void *)&timeout, sizeof(timeout))){
 		goto cleanup;
 	}
 

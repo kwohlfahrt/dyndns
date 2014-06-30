@@ -139,6 +139,7 @@ static bool waitForDNS(void){
 	}
 
 	// Only waiting on one file and one event, so contents don't matter
+	// FIXME: Can lock up here if localhost is the only DNS server. Could add a timeout.
 	ssize_t status = select(1, &fds, NULL, NULL, NULL);
 	if (status != -1)
 		retval = true;

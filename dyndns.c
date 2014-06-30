@@ -17,9 +17,9 @@
 #include "web_updater.h"
 
 static char const version[] = "0.0.1";
-unsigned int verbosity = 0;
 static int const termsig = SIGQUIT;
 
+#define EXIT_USAGE EXIT_FAILURE + 1
 static void printUsage(){
 	puts("dyndns -V\n"
 	     "dyndns -h\n"
@@ -44,7 +44,7 @@ static bool childOK(int const status){
 	return true;
 }
 
-int main(int argc, char** argv) {
+int main(int const argc, char** argv) {
 	struct AddrFilter filter = {};
 	int (* addr_processor)(struct IPAddr);
 
@@ -57,14 +57,14 @@ int main(int argc, char** argv) {
 		{"version", no_argument, 0, 'V'},
 		{"help", no_argument, 0, 'h'},
 	};
+	bool verbosity = 0;
 	int opt_index = 0;
 	char opt;
 	
 	while ((opt = getopt_long(argc, argv, short_opts, long_opts, &opt_index)) != -1) {
 		switch (opt) {
 		case 'v':
-			if (verbosity < 3)
-				++verbosity;
+			verbosity = 1;
 			break;
 		case 'V':
 			puts(version);
@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
 			return EXIT_SUCCESS;
 		default:
 			printUsage();
-			return 2;
+			return EXIT_USAGE;
 		}
 	}
 	
@@ -104,10 +104,10 @@ int main(int argc, char** argv) {
 	default:
 		puts("Usage:\n");
 		printUsage();
-		return 2;
+		return EXIT_USAGE;
 	}
 	
-	char * iface_name = argv[optind];
+	char const * const iface_name = argv[optind];
 	filter.iface = if_nametoindex(iface_name);
 	if (!filter.iface) {
 		fprintf(stderr, "Error resolving interface %s: %s\n",
@@ -115,10 +115,9 @@ int main(int argc, char** argv) {
 		return EXIT_FAILURE;
 	}
 	
-	if (verbosity)
-		printf("Running with verbosity: %i\n", verbosity);
-	if (verbosity > 0) {
-		printf("Listening on interfaces: %s\n", iface_name);
+	if (verbosity){
+		puts("Running in verbose mode.");
+		printf("Listening on interfaces: %s (#%d)\n", iface_name, filter.iface);
 		fputs("Listening for address changes in:", stdout);
 		if (checkFilterAf(filter, AF_INET)) 
 			printf(" IPv4");
@@ -179,5 +178,5 @@ int main(int argc, char** argv) {
 
 cleanup:
 	close(sock);
-	return 0;
+	return EXIT_FAILURE;
 }
