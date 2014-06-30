@@ -8,7 +8,6 @@
 
 #include <sys/socket.h>
 #include <net/if.h>
-
 #include <sys/wait.h>
 #include <signal.h>
 
@@ -16,8 +15,6 @@
 #include "ipaddr.h"
 #include "monitor.h"
 #include "web_updater.h"
-
-#include <arpa/inet.h>
 
 static char const version[] = "0.0.1";
 unsigned int verbosity = 0;

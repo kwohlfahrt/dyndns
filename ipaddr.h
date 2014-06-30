@@ -13,6 +13,7 @@ struct IPAddr {
 };
 
 bool addrIsPrivate(struct IPAddr const addr);
+bool addrIsLoopback(struct IPAddr const addr);
 bool addrInRange(struct IPAddr const test_addr, struct IPAddr const ref_addr, unsigned char ref_mask);
 bool addrEqual(struct IPAddr const addr1, struct IPAddr const addr2);
 int printAddr(struct IPAddr const addr);

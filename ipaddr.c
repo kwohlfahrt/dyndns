@@ -7,25 +7,42 @@
 
 #include <stdio.h>
 
-// Could implement in terms of addrInRange, but this is shorter.
 bool addrIsPrivate(const struct IPAddr addr){
+	struct IPAddr ref_addr = {.ipv6 = {}};
 	switch(addr.af){
 	case AF_INET:
-		// 10.0.0.0/8
-		if ((htonl(addr.ipv4.s_addr) & 0xFF000000) == 0x0A000000)
+		ref_addr.af = AF_INET;
+		ref_addr.ipv4.s_addr = ntohl(0x0A000000);	// 10.0.0.0
+		if (addrInRange(addr, ref_addr, 8))
 			return true;
-		// 172.16.0.0/12
-		if ((htonl(addr.ipv4.s_addr) & 0xFFF00000) == 0xAC100000)
+		ref_addr.ipv4.s_addr = ntohl(0xAC100000);	// 172.16.0.0
+		if (addrInRange(addr, ref_addr, 12))
 			return true;
-		// 192.168.0.0/16
-		if ((htonl(addr.ipv4.s_addr) & 0xFFFF0000) == 0xC0A80000)
+		ref_addr.ipv4.s_addr = ntohl(0xC0A80000);	// 192.168.0.0
+		if (addrInRange(addr, ref_addr, 16))
 			return true;
 		return false;
 	case AF_INET6:
-		// fc00::/7
-		if ((addr.ipv6.s6_addr[0] & 0xFE) == 0xFC)
-			return true;
+		ref_addr.af = AF_INET6;
+		ref_addr.ipv6.s6_addr[0] = 0xFC;	// fc00::
+		return addrInRange(addr, ref_addr, 7);
+	default:
+		errno = EINVAL;
 		return false;
+	}
+}
+
+bool addrIsLoopback(const struct IPAddr addr){
+	struct IPAddr ref_addr = {.ipv6 = {}};
+	switch(addr.af){
+	case AF_INET:
+		ref_addr.af = AF_INET;
+		ref_addr.ipv4.s_addr = ntohl(0x7F000000);	// 127.0.0.0
+		return addrInRange(addr, ref_addr, 8);
+	case AF_INET6:
+		ref_addr.af = AF_INET6;
+		ref_addr.ipv6.s6_addr[15] = 0x01;	// ::1
+		return addrInRange(addr, ref_addr, 128);
 	default:
 		errno = EINVAL;
 		return false;

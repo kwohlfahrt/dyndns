@@ -16,6 +16,8 @@ extern struct __res_state _res;
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/inotify.h>
+#include <sys/select.h>
 
 #include "web_updater.h"
 #include "ipaddr.h"
@@ -102,15 +104,54 @@ int getNameServers(struct IPAddr * const dst, size_t const num_addrs){
 	return _res.nscount;
 }
 
-// Need to clean up error handling on this.
+static bool waitForDNS(void){
+	bool retval = false;
+
+	#if MAXNS > 3
+	#warn "MAXNS larger than expected value of 3"
+	#endif
+	struct IPAddr dns_servers[MAXNS]; // MAXNS == 3 so will be small
+	int num_dns_servers;
+
+	int fd = inotify_init();
+	if (fd == -1){
+		return false;
+	}
+
+	fd_set fds;
+	FD_ZERO(&fds);
+	FD_SET(fd, &fds);
+
+	if (inotify_add_watch(fd, "/etc/resolv.conf", IN_MODIFY) == -1){
+		goto cleanup;
+	}
+
+	res_init();
+	num_dns_servers = getNameServers(dns_servers, _res.nscount);
+	for (int i = 0; i < num_dns_servers; ++i){
+		errno = 0;
+		bool is_loopback = addrIsLoopback(dns_servers[i]);
+		if (!is_loopback && errno != EINVAL){
+			// we already have a DNS server
+			retval = true;
+			goto cleanup;
+		}
+	}
+
+	// Only waiting on one file and one event, so contents don't matter
+	ssize_t status = select(1, &fds, NULL, NULL, NULL);
+	if (status != -1)
+		retval = true;
+
+cleanup:
+	close(fd);
+	return retval;
+}
+
 int webUpdate(struct IPAddr const addr){
 	char * url;
 	CURL * curl_handle = NULL;
 	int retval = CURLE_OK;
-	ssize_t sock = createRouteSocket();
-
-	if (sock == -1)
-		return CURLE_AGAIN;
 
 	if ((url = malloc(url_size)) == NULL){
 		retval = CURLE_OUT_OF_MEMORY;
@@ -133,11 +174,13 @@ int webUpdate(struct IPAddr const addr){
 	if ((retval = curl_easy_setopt(curl_handle, CURLOPT_URL, url)) != CURLE_OK)
 		goto cleanup;
 
+	// If interface is recently brought up, this will fail with CURLE_COULDNT_RESOLVE_HOST
+	// because NetworkManager hasn't set any DNS servers, so we will wait for one.
 	retval = curl_easy_perform(curl_handle);
-	// If interface is recently brought up, this will fail with
-	// CURLE_COULDNT_RESOLVE_HOST because NetworkManager hasn't set any routes.
-	// Could save nameserver in advance and wait for it to come back, or retry
-	// on any route that comes up.
+	if (retval == CURLE_COULDNT_RESOLVE_HOST){
+		if (waitForDNS())
+			retval = curl_easy_perform(curl_handle);
+	}
 	goto cleanup;
 
 cleanup:
@@ -146,7 +189,6 @@ cleanup:
 	else
 		printf("Failed to fetch URL: %s (%s)\n", url, curl_easy_strerror(retval));
 
-	close(sock);
 	free(url);
 	curl_easy_cleanup(curl_handle);
 	return retval;
