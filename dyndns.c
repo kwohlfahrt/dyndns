@@ -23,7 +23,7 @@ static int const termsig = SIGQUIT;
 static void printUsage(){
 	puts("dyndns -V\n"
 	     "dyndns -h\n"
-	     "dyndns [-v] [-p] [-4] [-6] interface [url]");
+	     "dyndns [-v] [-46] [--allow private] <interface> [URL]");
 }
 
 static bool childOK(int const status){
@@ -45,7 +45,7 @@ static bool childOK(int const status){
 }
 
 int main(int const argc, char** argv) {
-	struct AddrFilter filter = {};
+	struct AddrFilter filter = {.allow_private = false};
 	int (* addr_processor)(struct IPAddr);
 
 	// Deal with options

@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 
+// Might use a different return code for invalid result, save checking/setting errno
 bool addrIsPrivate(const struct IPAddr addr){
 	struct IPAddr ref_addr = {.af=addr.af, .ipv6 = {}};
 

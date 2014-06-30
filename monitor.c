@@ -103,21 +103,24 @@ static struct IPAddr matchAddr(char const * buf, ssize_t len, struct AddrFilter 
 			     rth = RTA_NEXT(rth, rtl)){ //RTA_NEXT modifies RTL
 				if (rth->rta_type != IFA_ADDRESS)
 					continue;
-				
+
+				struct IPAddr new_addr = {.af = AF_UNSPEC};
 				switch (ifa->ifa_family) {
 				case AF_INET:
-					retval.ipv4 = *((struct in_addr *) RTA_DATA(rth));
+					new_addr.ipv4 = *((struct in_addr *) RTA_DATA(rth));
 					break;
 				case AF_INET6:
-					retval.ipv6 = *((struct in6_addr *) RTA_DATA(rth));
+					new_addr.ipv6 = *((struct in6_addr *) RTA_DATA(rth));
 					break;
 				default:
 					continue;
 				}
-				retval.af = ifa->ifa_family; 
+				new_addr.af = ifa->ifa_family;
 
-				if (!filter.allow_private && addrIsPrivate(retval))
-					continue;
+				errno = 0;
+				if (filter.allow_private || (!addrIsPrivate(new_addr) && errno == 0)){
+					retval = new_addr;
+				}
 			}
 			}
 			break;
