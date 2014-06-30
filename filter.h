@@ -15,11 +15,6 @@ struct AddrFilter {
 	bool allow_private;
 };
 
-struct RouteFilter {
-	unsigned char num_addrs;
-	struct IPAddr * addrs;
-};
-
 enum rtnetlink_groups afToRtnl(int af);
 bool checkFilterAf(struct AddrFilter filter, int af);
 bool addFilterAf(struct AddrFilter *filter, int af);

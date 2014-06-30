@@ -8,10 +8,10 @@
 #include <stdio.h>
 
 bool addrIsPrivate(const struct IPAddr addr){
-	struct IPAddr ref_addr = {.ipv6 = {}};
+	struct IPAddr ref_addr = {.af=addr.af, .ipv6 = {}};
+
 	switch(addr.af){
 	case AF_INET:
-		ref_addr.af = AF_INET;
 		ref_addr.ipv4.s_addr = ntohl(0x0A000000);	// 10.0.0.0
 		if (addrInRange(addr, ref_addr, 8))
 			return true;
@@ -23,7 +23,6 @@ bool addrIsPrivate(const struct IPAddr addr){
 			return true;
 		return false;
 	case AF_INET6:
-		ref_addr.af = AF_INET6;
 		ref_addr.ipv6.s6_addr[0] = 0xFC;	// fc00::
 		return addrInRange(addr, ref_addr, 7);
 	default:
@@ -33,14 +32,12 @@ bool addrIsPrivate(const struct IPAddr addr){
 }
 
 bool addrIsLoopback(const struct IPAddr addr){
-	struct IPAddr ref_addr = {.ipv6 = {}};
+	struct IPAddr ref_addr = {.af=addr.af, .ipv6 = {}};
 	switch(addr.af){
 	case AF_INET:
-		ref_addr.af = AF_INET;
 		ref_addr.ipv4.s_addr = ntohl(0x7F000000);	// 127.0.0.0
 		return addrInRange(addr, ref_addr, 8);
 	case AF_INET6:
-		ref_addr.af = AF_INET6;
 		ref_addr.ipv6.s6_addr[15] = 0x01;	// ::1
 		return addrInRange(addr, ref_addr, 128);
 	default:
