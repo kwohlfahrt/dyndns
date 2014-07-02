@@ -27,4 +27,4 @@ react only to the specified one. Both may be explicitly specified.
 If `--allow-private` is specified, it will also react to private IPv4 addresses (10.0.0.0/8, 172.16.0.0/12,
 192.168.0.0/16) and IPv6 Unique Local Addresses (fc00::/7), otherwise these will be ignored.
 
-`v` adds some additional verbosity, but doesn't really do much.
+`-v` adds some additional verbosity, but doesn't really do much.

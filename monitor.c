@@ -15,6 +15,8 @@
 #include "filter.h"
 #include "ipaddr.h"
 
+static size_t buf_len = 1024;
+
 static ssize_t createNlSocket(enum rtnetlink_groups const * const groups, size_t num_groups){
 	ssize_t sock;
 	struct sockaddr_nl addr = {
@@ -132,7 +134,6 @@ static struct IPAddr matchAddr(char const * buf, ssize_t len, struct AddrFilter 
 
 // Returns AF_MAX if error, AF_UNSPEC if no more addrs (socket closed)
 struct IPAddr nextAddr(struct AddrFilter const filter, ssize_t const sock){
-	size_t buf_len = 1024;
 	char * buf = (char *) malloc(buf_len);
 
 	struct IPAddr addr;
