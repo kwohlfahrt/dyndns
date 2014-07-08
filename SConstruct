@@ -7,7 +7,7 @@ env.Append(CCFLAGS='-std=gnu11') #-std=c11 fails on checking for resolv
 env.Append(CCFLAGS='-Wall -Wextra')
 
 opts = Variables()
-opts.Add(PathVariable('DESTDIR', 'Directory to install to', '/usr', PathVariable.PathIsDir))
+opts.Add(PathVariable('DESTDIR', 'Directory to install to', '/usr', PathVariable.PathIsDirCreate))
 Help(opts.GenerateHelpText(env))
 opts.Update(env)
 
@@ -27,5 +27,7 @@ else:
 env = conf.Finish()
 
 dyndns = env.Program('dyndns', src)
-env.Install('$DESTDIR/bin', dyndns)
-env.Alias('install', '$DESTDIR')
+
+bindir = os.path.join('$DESTDIR', 'bin')
+install_bin = env.Install(bindir, dyndns)
+env.Alias('install', [install_bin])
