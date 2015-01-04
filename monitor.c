@@ -82,8 +82,7 @@ static struct IPAddr matchAddr(char const * buf, ssize_t len, struct AddrFilter 
 		case NLMSG_ERROR: {
 			struct nlmsgerr * err = (struct nlmsgerr *) NLMSG_DATA(nlh);
 			errno = -err->error;
-			retval.af = AF_MAX;
-			return retval;
+			goto error;
 		}
 		case RTM_NEWADDR: {
 			struct ifaddrmsg *ifa = (struct ifaddrmsg *) NLMSG_DATA(nlh);
@@ -120,7 +119,11 @@ static struct IPAddr matchAddr(char const * buf, ssize_t len, struct AddrFilter 
 				new_addr.af = ifa->ifa_family;
 
 				errno = 0;
-				if (filter.allow_private || (!addrIsPrivate(new_addr) && errno == 0)){
+				bool private = addrIsPrivate(new_addr);
+				if (errno != 0)
+					goto error;
+
+				if (filter.allow_private || !private){
 					retval = new_addr;
 				}
 			}
@@ -129,6 +132,10 @@ static struct IPAddr matchAddr(char const * buf, ssize_t len, struct AddrFilter 
 		}
 		}
 	}
+	return retval;
+
+error:
+	retval.af = AF_MAX;
 	return retval;
 }
 
