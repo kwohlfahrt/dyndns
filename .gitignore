@@ -1,0 +1,8 @@
+dyndns
+*.o
+
+.*.swp
+
+config.log
+.sconf_temp
+.sconsign.dblite
