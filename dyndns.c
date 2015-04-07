@@ -23,7 +23,7 @@ static int const termsig = SIGQUIT;
 static void printUsage(){
 	puts("dyndns -V\n"
 	     "dyndns -h\n"
-	     "dyndns [-v] [-46] [--allow private] <interface> [URL]");
+	     "dyndns [-v] [-46] [--allow private | -p] [--process-all | -a] <interface> [URL]");
 }
 
 static bool childOK(int const status){
@@ -50,19 +50,24 @@ int main(int const argc, char** argv) {
 
 	// Deal with options
 
-	const char short_opts[] = "vVh46";
+	const char short_opts[] = "vVh46pa";
 	struct option long_opts[] = {
 		{"allow-private", no_argument, 0, 'p'},
+		{"process-all", no_argument, 0, 'a'},
 		{"verbose", no_argument, 0, 'v'},
 		{"version", no_argument, 0, 'V'},
 		{"help", no_argument, 0, 'h'},
 	};
 	bool verbosity = 0;
+	bool process_all = false;
 	int opt_index = 0;
 	char opt;
 	
 	while ((opt = getopt_long(argc, argv, short_opts, long_opts, &opt_index)) != -1) {
 		switch (opt) {
+		case 'a':
+			process_all = true;
+			break;
 		case 'v':
 			verbosity = 1;
 			break;
@@ -146,7 +151,8 @@ int main(int const argc, char** argv) {
 		struct IPAddr new_addr = nextAddr(filter, sock);
 		if (child != -1){
 			// Make sure kill isn't called on first loop.
-			kill(child, termsig);
+			if (!process_all)
+				kill(child, termsig);
 			
 			int status;
 			if (waitpid(child, &status, 0) == -1){
