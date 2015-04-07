@@ -9,7 +9,7 @@
 
 // Might use a different return code for invalid result, save checking/setting errno
 bool addrIsPrivate(const struct IPAddr addr){
-	struct IPAddr ref_addr = {.af=addr.af, .ipv6={.s6_addr={}}};
+	struct IPAddr ref_addr = {.af=addr.af};	// Ensure address is initialized before use
 
 	switch(addr.af){
 	case AF_INET:
@@ -33,7 +33,7 @@ bool addrIsPrivate(const struct IPAddr addr){
 }
 
 bool addrIsLoopback(const struct IPAddr addr){
-	struct IPAddr ref_addr = {.af=addr.af, .ipv6={.s6_addr={}}};
+	struct IPAddr ref_addr = {.af=addr.af};	// Ensure address is initialized before use
 	switch(addr.af){
 	case AF_INET:
 		ref_addr.ipv4.s_addr = ntohl(0x7F000000);	// 127.0.0.0
