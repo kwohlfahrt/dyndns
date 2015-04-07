@@ -15,8 +15,6 @@
 #include "filter.h"
 #include "ipaddr.h"
 
-static size_t buf_len = 1024;
-
 static ssize_t createNlSocket(enum rtnetlink_groups const * const groups, size_t num_groups){
 	ssize_t sock;
 	struct sockaddr_nl addr = {
@@ -139,45 +137,49 @@ error:
 	return retval;
 }
 
-// Returns AF_MAX if error, AF_UNSPEC if no more addrs (socket closed)
-struct IPAddr nextAddr(struct AddrFilter const filter, ssize_t const sock){
-	char * buf = (char *) malloc(buf_len);
+ssize_t nextMessage(struct AddrFilter const filter, ssize_t const socket,
+                    char * * const buf, size_t * const buf_len){
+	ssize_t len = recv(socket, *buf, *buf_len, MSG_TRUNC);
+	if (len <= 0 ) {
+		// Error
+		return len;
+	} else if ((size_t) len > *buf_len){
+		// Reallocate with sufficient size
+		*buf_len = (size_t) len;
+		free(*buf);
+		*buf = malloc(*buf_len);
 
-	struct IPAddr addr;
-	ssize_t len;
-	while (true){
-		len = recv(sock, buf, buf_len, MSG_TRUNC);
-		if (len == 0) {
-			addr.af = AF_UNSPEC;
-			break;
-		}
-		if (len < 0) {
-			addr.af = AF_MAX;
-			break;
-		} else if ((size_t) len > buf_len){
-			// Reallocate with sufficient size
-			buf_len = (size_t) len;
-			buf = (char *) realloc(buf, buf_len);
+		// clear socket, else get EBUSY on requestAddr
+		while (recv(socket, *buf, *buf_len, MSG_DONTWAIT) != -1)
+			continue;
+		if (errno != EAGAIN && errno != EWOULDBLOCK)
+			return -1;
 
-			// clear socket, else get EBUSY on requestAddr
-			while (recv(sock, buf, buf_len, MSG_DONTWAIT) != -1)
-				continue;
-			if (errno != EAGAIN && errno != EWOULDBLOCK)
-				break;
+		if (!requestAddr(filter, socket))
+			return -1;
 
-			// Resynchronize
-			if (!requestAddr(filter, sock)){
-				addr.af = AF_MAX;
-				break;
-			}
-		} else {
-			addr = matchAddr(buf, len, filter);
-			if (addr.af != AF_UNSPEC)
-				// Something interesting happened, return it.
-				break;
-		}
+		return nextMessage(filter, socket, buf, buf_len);
+	} else {
+		return len;
 	}
-	
-	free(buf);
-	return addr;
+}
+
+// Returns AF_MAX if error, AF_UNSPEC if no more addrs (socket closed)
+struct IPAddr nextAddr(struct AddrFilter const filter, struct MonitorState * const state){
+	struct IPAddr addr;
+
+	state->nlmsg_len = nextMessage(filter, state->socket, &state->buf, &state->buf_len);
+	if (state->nlmsg_len == 0) {
+		addr.af = AF_UNSPEC;
+		return addr;
+	} else if (state->nlmsg_len < 0) {
+		addr.af = AF_MAX;
+		return addr;
+	} else {
+		addr = matchAddr(state->buf, state->nlmsg_len, filter);
+		if (addr.af == AF_UNSPEC)
+			return nextAddr(filter, state);
+		else
+			return addr;
+	}
 }

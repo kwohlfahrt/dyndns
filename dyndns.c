@@ -131,16 +131,22 @@ int main(int const argc, char** argv) {
 		puts("");
 	}
 
-	// Prepare monitoring
-
-	ssize_t sock = createAddrSocket(filter);
-	if (sock == -1){
+	// Prepare monitoring, cleanup necessary if exiting after this point.
+	struct MonitorState state;
+	state.socket = createAddrSocket(filter);
+	if (state.socket == -1){
 		perror("Couldn't create monitoring socket");
 		goto cleanup;
 	}
 
-	if (!requestAddr(filter, sock)){
+	if (!requestAddr(filter, state.socket)){
 		perror("Couldn't request current address");
+		goto cleanup;
+	}
+	state.buf_len = 1024;
+	state.buf = malloc(state.buf_len);
+	if (state.buf == NULL){
+		perror("Couldn't allocate memory for netlink messages.");
 		goto cleanup;
 	}
 
@@ -148,7 +154,7 @@ int main(int const argc, char** argv) {
 
 	pid_t child = -1;
 	do {
-		struct IPAddr new_addr = nextAddr(filter, sock);
+		struct IPAddr new_addr = nextAddr(filter, &state);
 		if (child != -1){
 			// Make sure kill isn't called on first loop.
 			if (!process_all)
@@ -177,12 +183,13 @@ int main(int const argc, char** argv) {
 			perror("Could not fork to process new address.");
 			break;
 		} else if (!child){
-			close(sock); // Make sure to set CLOEXEC if changing to exec.
+			close(state.socket); // Make sure to set CLOEXEC if changing to exec.
 			return addr_processor(new_addr);
 		}
 	} while (true);
 
 cleanup:
-	close(sock);
+	close(state.socket);
+	free(state.buf);
 	return EXIT_FAILURE;
 }
