@@ -18,8 +18,7 @@ struct MonitorState {
 	struct rtattr * rth;
 };
 
-ssize_t createAddrSocket(struct AddrFilter const filter);
-bool requestAddr(struct AddrFilter const filter, ssize_t const sock);
+bool initState(struct AddrFilter const filter, struct MonitorState * const state, size_t const buf_len);
 struct IPAddr nextAddr(struct AddrFilter const filter, struct MonitorState * const state);
 
 #endif /*_MONITOR_H*/

@@ -133,21 +133,9 @@ int main(int const argc, char** argv) {
 
 	// Prepare monitoring, cleanup necessary if exiting after this point.
 	struct MonitorState state;
-	state.socket = createAddrSocket(filter);
-	if (state.socket == -1){
-		perror("Couldn't create monitoring socket");
-		goto cleanup;
-	}
-
-	if (!requestAddr(filter, state.socket)){
-		perror("Couldn't request current address");
-		goto cleanup;
-	}
-	state.buf_len = 1024;
-	state.buf = malloc(state.buf_len);
-	if (state.buf == NULL){
-		perror("Couldn't allocate memory for netlink messages.");
-		goto cleanup;
+	if (!initState(filter, &state, 1024)){
+		perror("Couldn't set up for monitoring");
+		return EXIT_FAILURE;
 	}
 
 	// Main loop
@@ -188,7 +176,6 @@ int main(int const argc, char** argv) {
 		}
 	} while (true);
 
-cleanup:
 	close(state.socket);
 	free(state.buf);
 	return EXIT_FAILURE;

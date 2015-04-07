@@ -164,6 +164,28 @@ ssize_t nextMessage(struct AddrFilter const filter, ssize_t const socket,
 	}
 }
 
+bool initState(struct AddrFilter const filter, struct MonitorState * const state, size_t const buf_len){
+	state->socket = createAddrSocket(filter);
+	if (state->socket == -1)
+		return false;
+	if (!requestAddr(filter, state->socket)){
+		close(state->socket);
+		return false;
+	}
+	state->buf = malloc(buf_len);
+	if (state->buf == NULL){
+		close(state->socket);
+		return false;
+	}
+	state->buf_len = buf_len;
+
+	state->nlmsg_len = 0;
+	state->nlh = NULL;
+	state->rtmsg_len = 0;
+	state->rth = NULL;
+	return true;
+}
+
 // Returns AF_MAX if error, AF_UNSPEC if no more addrs (socket closed)
 struct IPAddr nextAddr(struct AddrFilter const filter, struct MonitorState * const state){
 	struct IPAddr addr;
