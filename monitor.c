@@ -69,74 +69,6 @@ bool requestAddr(struct AddrFilter const filter, ssize_t const sock){
 	return true;
 }
 
-// Returns AF_MAX if error, AF_UNSPEC if none matching
-static struct IPAddr matchAddr(char const * buf, ssize_t len, struct AddrFilter const filter){
-	struct IPAddr retval = {.af = AF_UNSPEC};
-
-	for (struct nlmsghdr *nlh = (struct nlmsghdr *) buf;
-	     NLMSG_OK(nlh, len) && (nlh->nlmsg_type != NLMSG_DONE);
-	     nlh = NLMSG_NEXT(nlh, len)){
-	     	switch (nlh->nlmsg_type) {
-		case NLMSG_ERROR: {
-			struct nlmsgerr * err = (struct nlmsgerr *) NLMSG_DATA(nlh);
-			errno = -err->error;
-			goto error;
-		}
-		case RTM_NEWADDR: {
-			struct ifaddrmsg *ifa = (struct ifaddrmsg *) NLMSG_DATA(nlh);
-			if (!checkFilterAf(filter, ifa->ifa_family))
-				continue;
-			// Until NLM_F_MATCH implemented
-			if (ifa->ifa_index != filter.iface)
-				continue;
-			
-			if (ifa->ifa_scope != RT_SCOPE_UNIVERSE
-			    && ifa->ifa_scope != RT_SCOPE_SITE)
-				continue;
-			
-			{
-			struct rtattr *rth;
-			unsigned int rtl;
-			for (rth = IFA_RTA(ifa), rtl = IFA_PAYLOAD(nlh);
-			     rtl && RTA_OK(rth, rtl);
-			     rth = RTA_NEXT(rth, rtl)){ //RTA_NEXT modifies RTL
-				if (rth->rta_type != IFA_ADDRESS)
-					continue;
-
-				struct IPAddr new_addr = {.af = AF_UNSPEC};
-				switch (ifa->ifa_family) {
-				case AF_INET:
-					new_addr.ipv4 = *((struct in_addr *) RTA_DATA(rth));
-					break;
-				case AF_INET6:
-					new_addr.ipv6 = *((struct in6_addr *) RTA_DATA(rth));
-					break;
-				default:
-					continue;
-				}
-				new_addr.af = ifa->ifa_family;
-
-				errno = 0;
-				bool private = addrIsPrivate(new_addr);
-				if (errno != 0)
-					goto error;
-
-				if (filter.allow_private || !private){
-					retval = new_addr;
-				}
-			}
-			}
-			break;
-		}
-		}
-	}
-	return retval;
-
-error:
-	retval.af = AF_MAX;
-	return retval;
-}
-
 ssize_t nextMessage(struct AddrFilter const filter, ssize_t const socket,
                     char * * const buf, size_t * const buf_len){
 	ssize_t len = recv(socket, *buf, *buf_len, MSG_TRUNC);
@@ -164,7 +96,8 @@ ssize_t nextMessage(struct AddrFilter const filter, ssize_t const socket,
 	}
 }
 
-bool initState(struct AddrFilter const filter, struct MonitorState * const state, size_t const buf_len){
+bool initState(struct AddrFilter const filter, struct MonitorState * const state,
+               size_t const buf_len){
 	state->socket = createAddrSocket(filter);
 	if (state->socket == -1)
 		return false;
@@ -186,22 +119,72 @@ bool initState(struct AddrFilter const filter, struct MonitorState * const state
 	return true;
 }
 
-// Returns AF_MAX if error, AF_UNSPEC if no more addrs (socket closed)
+bool filterRtMsg(struct rtattr const rth){
+	return rth.rta_type == IFA_ADDRESS;
+}
+
+bool filterIfAddrMsg(struct ifaddrmsg const ifa, struct AddrFilter const filter){
+	return checkFilterAf(filter, ifa.ifa_family)
+	       && ifa.ifa_index == filter.iface
+	       && (ifa.ifa_scope == RT_SCOPE_UNIVERSE || ifa.ifa_scope == RT_SCOPE_SITE);
+}
+
+// Returns AF_MAX (with errno set) if error, AF_UNSPEC if no more addrs (socket closed)
 struct IPAddr nextAddr(struct AddrFilter const filter, struct MonitorState * const state){
-	struct IPAddr addr;
+	// NLMSG_OK checks length first, so safe to call with state->nlh == NULL iff
+	// state->nlmsg_len < (int) sizeof(struct nlmsghdr)
+	for (; NLMSG_OK(state->nlh, state->nlmsg_len) && (state->nlh->nlmsg_type != NLMSG_DONE);
+	     state->nlh = NLMSG_NEXT(state->nlh, state->nlmsg_len)){
+		switch (state->nlh->nlmsg_type){
+		case NLMSG_ERROR:
+			errno = -((struct nlmsgerr *) NLMSG_DATA(state->nlh))->error;
+			struct IPAddr addr = {.af = AF_MAX};
+			return addr;
+		case RTM_NEWADDR: {
+			struct ifaddrmsg * ifa = (struct ifaddrmsg *) NLMSG_DATA(state->nlh);
+			if (!filterIfAddrMsg(*ifa, filter))
+				continue;
+			// Initialize only if not already valid, otherwise go directly into loop
+			else if (!RTA_OK(state->rth, state->rtmsg_len)){
+				state->rth = IFA_RTA(ifa);
+				state->rtmsg_len = IFA_PAYLOAD(state->nlh);
+			}
+			for (; RTA_OK(state->rth, state->rtmsg_len);
+			     state->rth = RTA_NEXT(state->rth, state->rtmsg_len)){
+				if (!filterRtMsg(*state->rth))
+					continue;
+
+				struct IPAddr addr = {.af=ifa->ifa_family};
+				switch (ifa->ifa_family) {
+				case AF_INET:
+					addr.ipv4 = *((struct in_addr *) RTA_DATA(state->rth));
+					break;
+				case AF_INET6:
+					addr.ipv6 = *((struct in6_addr *) RTA_DATA(state->rth));
+					break;
+				default:
+					continue;
+				}
+				if (!addrIsPrivate(addr) || filter.allow_private){
+					state->rth = RTA_NEXT(state->rth, state->rtmsg_len);
+					return addr;
+				}
+			}
+		}
+		}
+	}
 
 	state->nlmsg_len = nextMessage(filter, state->socket, &state->buf, &state->buf_len);
 	if (state->nlmsg_len == 0) {
-		addr.af = AF_UNSPEC;
+		// Socket closed by kernel
+		struct IPAddr addr = {.af = AF_UNSPEC};
 		return addr;
 	} else if (state->nlmsg_len < 0) {
-		addr.af = AF_MAX;
+		// Socket error
+		struct IPAddr addr = {.af = AF_MAX};
 		return addr;
-	} else {
-		addr = matchAddr(state->buf, state->nlmsg_len, filter);
-		if (addr.af == AF_UNSPEC)
-			return nextAddr(filter, state);
-		else
-			return addr;
+	} else  {
+		state->nlh = (struct nlmsghdr *) state->buf;
+		return nextAddr(filter, state);
 	}
 }
