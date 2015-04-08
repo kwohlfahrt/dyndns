@@ -2,6 +2,7 @@ dyndns
 *.o
 
 .*.swp
+.*.swo
 
 config.log
 .sconf_temp
