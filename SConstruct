@@ -3,8 +3,8 @@ import os
 src = ['dyndns.c', 'web_updater.c', 'filter.c', 'ipaddr.c', 'monitor.c']
 
 env = Environment(**os.environ)
-env.Append(CCFLAGS='-std=gnu11') #-std=c11 fails on checking for resolv
-env.Append(CCFLAGS='-Wall -Wextra -Wpedantic')
+env.Append(CCFLAGS=' -std=gnu11') #-std=c11 fails on checking for resolv
+env.Append(CCFLAGS=' -Wall -Wextra -Wpedantic')
 
 opts = Variables()
 opts.Add(PathVariable('DESTDIR', 'Directory to install to', '/usr', PathVariable.PathIsDirCreate))
