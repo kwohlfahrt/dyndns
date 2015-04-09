@@ -126,7 +126,8 @@ bool filterRtMsg(struct rtattr const rth){
 bool filterIfAddrMsg(struct ifaddrmsg const ifa, struct AddrFilter const filter){
 	return checkFilterAf(filter, ifa.ifa_family)
 	       && ifa.ifa_index == filter.iface
-	       && (ifa.ifa_scope == RT_SCOPE_UNIVERSE || ifa.ifa_scope == RT_SCOPE_SITE);
+	       && (ifa.ifa_scope == RT_SCOPE_UNIVERSE || ifa.ifa_scope == RT_SCOPE_SITE)
+	       && !(ifa.ifa_flags & IFA_F_DEPRECATED);
 }
 
 // Returns AF_MAX (with errno set) if error, AF_UNSPEC if no more addrs (socket closed)
