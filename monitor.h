@@ -13,9 +13,6 @@ struct MonitorState {
 
 	ssize_t nlmsg_len;
 	struct nlmsghdr * nlh;
-
-	size_t rtmsg_len;
-	struct rtattr * rth;
 };
 
 bool initState(struct AddrFilter const filter, struct MonitorState * const state, size_t const buf_len);
