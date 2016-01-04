@@ -27,7 +27,7 @@ bool addFilterAf( struct AddrFilter *filter, int af){
 		errno = EFAULT;
 		return false;
 	}
-		
+
 	if (checkFilterAf(*filter, af))
 		return true;
 	if (filter->num_af >= sizeof(filter->af)){

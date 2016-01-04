@@ -15,7 +15,7 @@ Usage
 -----
 
     dyndns [-v] [-46] [--allow-private] <interface> [URL]
-    
+
 If called with one option, `dyndns` will print new IP addresses to `stdout`.
 
 If called with two it will `GET` the address specified by `URL`, substituting the pattern `<ipaddr>`

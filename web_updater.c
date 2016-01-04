@@ -77,7 +77,7 @@ static char * templateUrl(struct IPAddr address, char * dst, size_t max_size){
 			errno = ENOSPC;
 			return NULL;
 	}
-	
+
 	return dst;
 }
 

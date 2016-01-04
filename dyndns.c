@@ -62,7 +62,7 @@ int main(int const argc, char** argv) {
 	bool process_all = false;
 	int opt_index = 0;
 	char opt;
-	
+
 	while ((opt = getopt_long(argc, argv, short_opts, long_opts, &opt_index)) != -1) {
 		switch (opt) {
 		case 'a':
@@ -91,7 +91,7 @@ int main(int const argc, char** argv) {
 			return EXIT_USAGE;
 		}
 	}
-	
+
 	// Listen for all changes if none specified.
 	if (filter.num_af == 0){
 		addFilterAf(&filter, AF_INET);
@@ -111,7 +111,7 @@ int main(int const argc, char** argv) {
 		printUsage();
 		return EXIT_USAGE;
 	}
-	
+
 	char const * const iface_name = argv[optind];
 	filter.iface = if_nametoindex(iface_name);
 	if (!filter.iface) {
@@ -119,14 +119,14 @@ int main(int const argc, char** argv) {
 			iface_name, strerror(errno));
 		return EXIT_FAILURE;
 	}
-	
+
 	if (verbosity){
 		puts("Running in verbose mode.");
 		printf("Listening on interfaces: %s (#%d)\n", iface_name, filter.iface);
 		fputs("Listening for address changes in:", stdout);
-		if (checkFilterAf(filter, AF_INET)) 
+		if (checkFilterAf(filter, AF_INET))
 			printf(" IPv4");
-		if (checkFilterAf(filter, AF_INET6)) 
+		if (checkFilterAf(filter, AF_INET6))
 			printf(" IPv6");
 		puts("");
 	}
@@ -147,7 +147,7 @@ int main(int const argc, char** argv) {
 			// Make sure kill isn't called on first loop.
 			if (!process_all)
 				kill(child, termsig);
-			
+
 			int status;
 			if (waitpid(child, &status, 0) == -1){
 				perror("Error waiting for child");

@@ -63,7 +63,7 @@ bool addrInRange(const struct IPAddr test_addr, const struct IPAddr ref_addr, un
 		        == (ref_addr.ipv4.s_addr & mask));
 	}
 	case AF_INET6:
-		for(size_t i = 0; i < sizeof(test_addr.ipv6.s6_addr) && ref_mask > 0; ++i, ref_mask -= 8){ 
+		for(size_t i = 0; i < sizeof(test_addr.ipv6.s6_addr) && ref_mask > 0; ++i, ref_mask -= 8){
 			if (ref_mask < 8) {
 				unsigned char byte_mask = 255 << (8 - ref_mask);
 				return ((ref_addr.ipv6.s6_addr[i] & byte_mask)

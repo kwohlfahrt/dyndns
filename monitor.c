@@ -19,7 +19,7 @@ static ssize_t createNlSocket(enum rtnetlink_groups const * const groups, size_t
 	ssize_t sock;
 	struct sockaddr_nl addr = {
 		.nl_family = AF_NETLINK,
-		// .nl_pid = 0 // kernel takes care of nl_pid if it is 0
+		.nl_pid = 0 // kernel takes care of nl_pid if it is 0
 	};
 
 	if ((sock = socket(PF_NETLINK, SOCK_DGRAM, NETLINK_ROUTE)) == -1) {
@@ -61,7 +61,7 @@ bool requestAddr(struct AddrFilter const filter, ssize_t const sock){
 			.ifa_index = filter.iface, // Does nothing as NLM_F_MATCH not implemented
 		},
 	};
-	
+
 	if (send(sock, &req, req.nlh.nlmsg_len, 0) < 0){
 		return false;
 	}
