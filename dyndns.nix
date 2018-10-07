@@ -6,4 +6,6 @@ stdenv.mkDerivation {
 
   nativeBuildInputs = [ meson ninja pkgconfig ];
   buildInputs = [ curl ];
+
+  mesonFlags = [ "-Dwith-systemd=true" ];
 }
