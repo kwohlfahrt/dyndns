@@ -3,7 +3,3 @@ dyndns
 
 .*.swp
 .*.swo
-
-config.log
-.sconf_temp
-.sconsign.dblite
