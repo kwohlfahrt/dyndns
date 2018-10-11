@@ -16,6 +16,10 @@
 #include "monitor.h"
 #include "web_updater.h"
 
+#ifdef WITH_SYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
+
 static char const version[] = "0.0.1";
 static int const termsig = SIGQUIT;
 
@@ -137,6 +141,10 @@ int main(int const argc, char** argv) {
 		perror("Couldn't set up for monitoring");
 		return EXIT_FAILURE;
 	}
+
+#ifdef WITH_SYSTEMD
+  sd_notify(0, "READY=1");
+#endif
 
 	// Main loop
 
