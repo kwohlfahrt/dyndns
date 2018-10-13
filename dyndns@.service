@@ -1,0 +1,8 @@
+[Unit]
+Description=Small dynamic DNS client
+After=network.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/bin/dyndns -46 --allow-private %i
