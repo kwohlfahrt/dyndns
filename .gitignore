@@ -1,5 +1,1 @@
-dyndns
-*.o
-
-.*.swp
-.*.swo
+build
