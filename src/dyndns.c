@@ -61,7 +61,7 @@ int main(int const argc, char** argv) {
 	bool verbosity = 0;
 	bool process_all = false;
 	int opt_index = 0;
-	char opt;
+	int opt;
 
 	while ((opt = getopt_long(argc, argv, short_opts, long_opts, &opt_index)) != -1) {
 		switch (opt) {
