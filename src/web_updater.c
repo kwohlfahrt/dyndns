@@ -150,7 +150,7 @@ cleanup:
 }
 
 int webUpdate(struct IPAddr const addr){
-	char * url;
+	char * url, * auth;
 	CURL * curl_handle = NULL;
 	int retval = CURLE_OK;
 
@@ -174,6 +174,13 @@ int webUpdate(struct IPAddr const addr){
 
 	if ((retval = curl_easy_setopt(curl_handle, CURLOPT_URL, url)) != CURLE_OK)
 		goto cleanup;
+
+	if ((auth = getenv("HTTP_AUTH")) != NULL) {
+		if ((retval = curl_easy_setopt(curl_handle, CURLOPT_HTTPAUTH, CURLAUTH_BASIC)) != CURLE_OK)
+			goto cleanup;
+		if ((retval = curl_easy_setopt(curl_handle, CURLOPT_USERPWD, auth)) != CURLE_OK)
+			goto cleanup;
+	}
 
 	// If interface is recently brought up, this will fail with CURLE_COULDNT_RESOLVE_HOST
 	// because NetworkManager hasn't set any DNS servers, so we will wait for one.
