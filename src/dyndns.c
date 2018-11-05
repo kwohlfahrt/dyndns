@@ -135,7 +135,6 @@ int main(int const argc, char** argv) {
 	do {
 		struct IPAddr new_addr = nextAddr(filter, &state);
 		if (child != -1){
-			// Make sure kill isn't called on first loop.
 			if (!process_all)
 				kill(child, termsig);
 
@@ -161,6 +160,8 @@ int main(int const argc, char** argv) {
 				fputs("Processing child exited abnormally.", stderr);
 				break;
 			}
+
+			child = -1;
 		}
 
 		if (new_addr.af == AF_MAX){
