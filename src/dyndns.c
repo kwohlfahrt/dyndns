@@ -30,24 +30,6 @@ static void printUsage(){
 	     "dyndns [-v] [-46] [--allow private | -p] [--process-all | -a] <interface> [URL]");
 }
 
-static bool childOK(int const status){
-	if (WIFEXITED(status)){
-		if (WEXITSTATUS(status) != 0) {
-			fprintf(stderr, "Processing child exited with status %d\n", WEXITSTATUS(status));
-			return false;
-		}
-	} else if (WIFSIGNALED(status)){
-		if (WTERMSIG(status) != termsig){
-			fprintf(stderr, "Processing child terminated by signal %d\n", WTERMSIG(status));
-			return false;
-		}
-	} else {
-		fputs("Processing child exited abnormally.", stderr);
-		return false;
-	}
-	return true;
-}
-
 int main(int const argc, char** argv) {
 	struct AddrFilter filter = {.allow_private = false};
 	int (* addr_processor)(struct IPAddr);
@@ -143,12 +125,13 @@ int main(int const argc, char** argv) {
 	}
 
 #ifdef WITH_SYSTEMD
-  sd_notify(0, "READY=1");
+	sd_notify(0, "READY=1");
 #endif
 
 	// Main loop
 
 	pid_t child = -1;
+	struct IPAddr remote_addr = {.af = AF_UNSPEC}, prev_addr = {.af = AF_UNSPEC};
 	do {
 		struct IPAddr new_addr = nextAddr(filter, &state);
 		if (child != -1){
@@ -161,8 +144,23 @@ int main(int const argc, char** argv) {
 				perror("Error waiting for child");
 				break;
 			}
-			if (!childOK(status))
+
+			if (WIFEXITED(status)){
+				if (WEXITSTATUS(status) != 0) {
+					fprintf(stderr, "Processing child exited with status %d\n", WEXITSTATUS(status));
+					break;
+				} else {
+					remote_addr = prev_addr;
+				}
+			} else if (WIFSIGNALED(status)){
+				if (WTERMSIG(status) != termsig){
+					fprintf(stderr, "Processing child terminated by signal %d\n", WTERMSIG(status));
+					break;
+				}
+			} else {
+				fputs("Processing child exited abnormally.", stderr);
 				break;
+			}
 		}
 
 		if (new_addr.af == AF_MAX){
@@ -173,6 +171,10 @@ int main(int const argc, char** argv) {
 			break;
 		}
 
+		if (!process_all && addrEqual(remote_addr, new_addr)) {
+			continue;
+		}
+
 		// TODO: Could use exec
 		child = fork();
 		if (child == -1){
@@ -181,6 +183,8 @@ int main(int const argc, char** argv) {
 		} else if (!child){
 			close(state.socket); // Make sure to set CLOEXEC if changing to exec.
 			return addr_processor(new_addr);
+		} else {
+			prev_addr = new_addr;
 		}
 	} while (true);
 

@@ -91,6 +91,8 @@ bool addrEqual(const struct IPAddr addr1, const struct IPAddr addr2){
 				return false;
 		}
 		return true;
+	case AF_UNSPEC:
+		return false;
 	default:
 		errno = EINVAL;
 		return false;
