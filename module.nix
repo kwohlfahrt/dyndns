@@ -39,16 +39,20 @@ in {
     };
   };
 
-  config.systemd.services.dyndns = mkIf cfg.enable {
-    description = "Small Dynamic DNS Client";
-    after = [ "network.target" ];
-    wantedBy = [ "multi-user.target" ];
-    serviceConfig = {
-      Type = "notify";
-      ExecStart = let
-        flags = lib.concatStringsSep " "
-          (["-${cfg.class or "46"}"] ++ lib.optional cfg.allow_private "--allow-private");
-        in "${pkgs.dyndns}/bin/dyndns ${flags} ${cfg.interface} ${cfg.url}";
+  config = mkIf cfg.enable {
+    environment.systemPackages = with pkgs; [ dyndns ];
+
+    systemd.services.dyndns = {
+      description = "Small Dynamic DNS Client";
+      after = [ "network.target" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "notify";
+        ExecStart = let
+          flags = lib.concatStringsSep " "
+            (["-${cfg.class or "46"}"] ++ lib.optional cfg.allow_private "--allow-private");
+          in "${pkgs.dyndns}/bin/dyndns ${flags} ${cfg.interface} ${cfg.url}";
+      };
     };
   };
 }
