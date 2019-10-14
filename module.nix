@@ -13,13 +13,13 @@ in {
       '';
     };
     interface = mkOption {
-      type = types.string;
+      type = types.str;
       description = ''
         Which interface to monitor for IP address changes.
       '';
     };
     url = mkOption {
-      type = types.string;
+      type = types.str;
       description = ''
         Which URL to GET in response to changes.
       '';
