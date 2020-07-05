@@ -3,8 +3,6 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <errno.h>
-#include <resolv.h>
-extern struct __res_state _res;
 
 #include <string.h>
 #ifndef HAVE_strlcpy
@@ -21,64 +19,60 @@ extern struct __res_state _res;
 
 #include "web_updater.h"
 #include "ipaddr.h"
-#include "monitor.h"
 #include "filter.h"
+#include "util.h"
 
-static char const * url_template = "";
-static size_t url_size = 0;
-static char const * const ip_tag = "<ipaddr>";
+struct Updater {
+	CURLM* multi_handle;
+	CURL* handle;
 
-size_t countIpTags(const char * template){
-	size_t retval = 0;
-	while ((template = strstr(template, ip_tag)) != NULL){
-		retval++;
-		template++;
-	}
-	return retval;
-}
+	char const* template;
+	char* url;
+	size_t url_len;
 
-// No need to copy in current use. Might change.
-void setUrl(char const * const new_url){
-	url_template = new_url;
-	url_size = strlen(url_template) + 1
-	           + ( countIpTags(url_template)
-	             * (INET6_ADDRSTRLEN - strlen(ip_tag)));
-	return;
-}
+	int* timeout;
+};
 
-static char * templateUrl(struct IPAddr address, char * dst, size_t max_size){
-	char ip_str[INET6_ADDRSTRLEN];
-	if (!inet_ntop(address.af, &address, ip_str, sizeof(ip_str))){
-		return NULL;
-	}
-	size_t ip_len = strlen(ip_str);
-	size_t tag_len = strlen(ip_tag);
+struct EpollData {
+	enum EpollTag tag;
+	struct Updater updater;
+};
 
-	size_t copy_len;
+char const * const ip_tag = "<ipaddr>";
+
+bool templateUrl(struct IPAddr address, char const * src, char * dst, size_t max_size){
+	const size_t tag_len = strlen(ip_tag);
+
 	char * write_pos = dst;
-	const char * read_pos = url_template;
-	const char * template_pos;
+	const char * read_pos = src;
+	const char * tag_pos = src;
 
-	while ((template_pos = strstr(read_pos, ip_tag)) != NULL){
-		copy_len = template_pos - read_pos;
-		if ((copy_len + ip_len) > max_size){
+	while ((tag_pos = strstr(read_pos, ip_tag)) != NULL){
+		size_t copy_len = tag_pos - read_pos;
+		if (copy_len > max_size) {
 			errno = ENOSPC;
-			return NULL;
+			return false;
 		}
 		memcpy(write_pos, read_pos, copy_len);
 		write_pos += copy_len;
-		memcpy(write_pos, ip_str, ip_len);
+		max_size -= copy_len;
+
+		if (inet_ntop(address.af, &address, write_pos, max_size) == NULL) {
+			return false;
+		}
+		size_t ip_len = strlen(write_pos);
 		write_pos += ip_len;
+		max_size -= ip_len;
 
-		max_size -= copy_len + ip_len;
-		read_pos = template_pos + tag_len;
+		read_pos = tag_pos + tag_len;
 	}
+
 	if (strlcpy(write_pos, read_pos, max_size) >= max_size){
-			errno = ENOSPC;
-			return NULL;
+		errno = ENOSPC;
+		return false;
 	}
 
-	return dst;
+	return true;
 }
 
 static size_t discard(__attribute__((unused)) char *ptr,
@@ -87,110 +81,80 @@ static size_t discard(__attribute__((unused)) char *ptr,
 	return size * nmemb;
 }
 
-int getNameServers(struct IPAddr * const dst, size_t const num_addrs){
-	res_init();
-	for (int i = 0; i < _res.nscount && (size_t) i < num_addrs; ++i){
-		if (_res.nsaddr_list[i].sin_addr.s_addr != 0){
-			dst[i].af = AF_INET;
-			dst[i].ipv4 = _res.nsaddr_list[i].sin_addr;
-		} else if (_res._u._ext.nsaddrs[i] != NULL){
-			dst[i].af = AF_INET6;
-			dst[i].ipv6 = _res._u._ext.nsaddrs[i]->sin6_addr;
-		} else {
-			dst[i].af = AF_UNSPEC;
-		}
-	}
+static int socket_cb(CURL* handle, curl_socket_t s, int what, void *cb_data, void * socketp) {
+	struct EpollData * data = (struct EpollData *) cb_data;
 
-	return _res.nscount;
+	return 0;
 }
 
-static bool waitForDNS(void){
-	bool retval = false;
+static int timer_cb(CURLM* multi_handle, long timeout, void* cb_data) {
+	struct EpollData * data = (struct EpollData *) cb_data;
 
-	#if MAXNS > 3
-	#warn "MAXNS larger than expected value of 3"
-	#endif
-	struct IPAddr dns_servers[MAXNS]; // MAXNS == 3 so will be small
-	int num_dns_servers;
-
-	int fd = inotify_init();
-	if (fd == -1){
-		return false;
+	if (timeout == -1) {
 	}
 
-	fd_set fds;
-	FD_ZERO(&fds);
-	FD_SET(fd, &fds);
+	return 0;
+}
 
-	if (inotify_add_watch(fd, "/etc/resolv.conf", IN_MODIFY) == -1){
-		goto cleanup;
+Updater_t createUpdater(char const * template, int * timeout) {
+	struct EpollData * data = malloc(sizeof(*data));
+	data->tag = TAG_UPDATER;
+
+	struct Updater * updater = &data->updater;
+	updater->multi_handle = NULL;
+	updater->handle = NULL;
+	updater->url = NULL;
+	updater->template = template;
+	updater->timeout = timeout;
+
+	size_t url_len = strlen(template) + 1;
+	char const * tag_pos = template;
+	while ((tag_pos = strstr(tag_pos, ip_tag)) != NULL) {
+		// Subtract the trailing NULL
+		url_len += INET6_ADDRSTRLEN - 1;
 	}
+	updater->url = malloc(url_len);
 
-	res_init();
-	num_dns_servers = getNameServers(dns_servers, _res.nscount);
-	for (int i = 0; i < num_dns_servers; ++i){
-		errno = 0;
-		bool is_loopback = addrIsLoopback(dns_servers[i]);
-		if (!is_loopback && errno != EINVAL){
-			// we already have a DNS server
-			retval = true;
-			goto cleanup;
-		}
-	}
+	if ((updater->multi_handle = curl_multi_init()) == NULL) goto cleanup;
+	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_SOCKETDATA, updater) != CURLM_OK) goto cleanup;
+	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_SOCKETFUNCTION, socket_cb) != CURLM_OK) goto cleanup;
+	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_TIMERDATA, updater) != CURLM_OK) goto cleanup;
+	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb) != CURLM_OK) goto cleanup;
 
-	// Only waiting on one file and one event, so contents don't matter
-	// FIXME: Can lock up here if localhost is the only DNS server. Could add a timeout.
-	ssize_t status = select(1, &fds, NULL, NULL, NULL);
-	if (status != -1)
-		retval = true;
+	if ((updater->handle = curl_easy_init()) == NULL) goto cleanup;
+	return data;
 
 cleanup:
-	close(fd);
-	return retval;
-}
+	destroyUpdater(data);
+	return NULL;
+};
 
-int webUpdate(struct IPAddr const addr){
-	char * url;
-	CURL * curl_handle = NULL;
-	int retval = CURLE_OK;
+void destroyUpdater(Updater_t data) {
+	struct Updater * updater = &data->updater;
 
-	if ((url = malloc(url_size)) == NULL){
-		retval = CURLE_OUT_OF_MEMORY;
-		goto cleanup;
-	}
+	if (updater->multi_handle != NULL) curl_multi_cleanup(updater->multi_handle);
+	updater->multi_handle = NULL;
+	if (updater->handle != NULL) curl_easy_cleanup(updater->handle);
+	updater->handle = NULL;
+	if (updater->url != NULL) free(updater->url);
+	updater->url = NULL;
+};
 
-	if (templateUrl(addr, url, url_size) == NULL){
-		retval = CURLE_OUT_OF_MEMORY;
-		goto cleanup;
-	}
+int webUpdate(struct IPAddr const addr, void* data){
+	struct Updater * updater = (struct Updater *) data;
 
-	if ((curl_handle = curl_easy_init()) == NULL){
-		retval = CURLE_FAILED_INIT;
-		goto cleanup;
-	}
+	if (!templateUrl(addr, updater->template, updater->url, updater->url_len)) return -1;
+	if (curl_easy_setopt(updater->handle, CURLOPT_WRITEFUNCTION, discard) != CURLE_OK) return -1;
+	if (curl_easy_setopt(updater->handle, CURLOPT_URL, updater->url) != CURLE_OK) return -1;
+	if (curl_multi_add_handle(updater->multi_handle, updater->handle) != CURLM_OK) return -1;
 
-	if ((retval = curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, discard)) != CURLE_OK)
-		goto cleanup;
-
-	if ((retval = curl_easy_setopt(curl_handle, CURLOPT_URL, url)) != CURLE_OK)
-		goto cleanup;
+	int n_active;
+	if (curl_multi_socket_action(updater->multi_handle, CURL_SOCKET_TIMEOUT, 0, &n_active) != CURLM_OK) return -1;
 
 	// If interface is recently brought up, this will fail with CURLE_COULDNT_RESOLVE_HOST
 	// because NetworkManager hasn't set any DNS servers, so we will wait for one.
-	retval = curl_easy_perform(curl_handle);
 	if (retval == CURLE_COULDNT_RESOLVE_HOST){
-		if (waitForDNS())
-			retval = curl_easy_perform(curl_handle);
 	}
-	goto cleanup;
 
-cleanup:
-	if (retval == CURLE_OK)
-		printf("Fetched URL: %s\n", url);
-	else
-		printf("Failed to fetch URL: %s (%s)\n", url, curl_easy_strerror(retval));
-
-	free(url);
-	curl_easy_cleanup(curl_handle);
-	return retval;
+	return 0;
 }

@@ -1,9 +1,9 @@
-#ifndef _WEB_UPDATER_H
-#define _WEB_UPDATER_H
+#pragma once
 
 #include "ipaddr.h"
 
-void setUrl(char const * const new_url);
-int webUpdate(struct IPAddr const addr);
+typedef struct EpollData * Updater_t;
 
-#endif /*_WEB_UPDATER_H*/
+Updater_t createUpdater();
+void destroyUpdater(Updater_t updater);
+int webUpdate(struct IPAddr addr, void* data);

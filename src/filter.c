@@ -1,41 +1,20 @@
 #include "filter.h"
+#include "ipaddr.h"
 
-#include <sys/socket.h>
-#include <errno.h>
-
-enum rtnetlink_groups afToRtnl(int af){
-	switch (af){
-	case AF_INET:
-		return RTNLGRP_IPV4_IFADDR;
-	case AF_INET6:
-		return RTNLGRP_IPV6_IFADDR;
-	default:
-		return RTNLGRP_NONE;
-	}
+bool filterMessage(struct AddrFilter const * filter, struct ifaddrmsg const * msg){
+	return ((msg->ifa_family == AF_INET6 && filter->ipv6)
+	        || (msg->ifa_family == AF_INET && filter->ipv4))
+	       && msg->ifa_index == filter->iface
+	       && (msg->ifa_scope == RT_SCOPE_UNIVERSE
+	           || msg->ifa_scope == RT_SCOPE_SITE)
+	       && !(msg->ifa_flags & IFA_F_DEPRECATED);
 }
 
-bool checkFilterAf( struct AddrFilter filter, int af){
-	enum rtnetlink_groups grp = afToRtnl(af);
-	for (size_t i = 0; i < filter.num_af; i++)
-		if (filter.af[i] == grp)
-			return true;
-	return false;
-}
-
-bool addFilterAf( struct AddrFilter *filter, int af){
-	if (filter == NULL){
-		errno = EFAULT;
+bool filterAttr(struct AddrFilter const * filter,
+		struct ifaddrmsg const * msg,
+		struct rtattr const * attr){
+	if (attr->rta_type != IFA_ADDRESS)
 		return false;
-	}
-
-	if (checkFilterAf(*filter, af))
-		return true;
-	if (filter->num_af >= sizeof(filter->af)){
-		errno = ENOSPC;
-		return false;
-	}
-
-	filter->af[filter->num_af] = afToRtnl(af);
-	filter->num_af++;
-	return true;
+	struct IPAddr addr = addrFromAttr(msg, attr);
+	return filter->allow_private || !addrIsPrivate(addr);
 }

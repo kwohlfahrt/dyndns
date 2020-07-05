@@ -7,10 +7,11 @@
 #include <unistd.h>
 
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <net/if.h>
-#include <sys/wait.h>
 #include <signal.h>
 
+#include "util.h"
 #include "filter.h"
 #include "ipaddr.h"
 #include "monitor.h"
@@ -20,40 +21,41 @@
 #include <systemd/sd-daemon.h>
 #endif
 
-static char const version[] = "0.0.1";
-static int const termsig = SIGQUIT;
+static char const version[] = "0.0.2";
 
 #define EXIT_USAGE EXIT_FAILURE + 1
 static void printUsage(){
 	puts("dyndns -V\n"
 	     "dyndns -h\n"
-	     "dyndns [-v] [-46] [--allow private | -p] [--process-all | -a] <interface> [URL]");
+	     "dyndns [-v] [-46] [--allow-temporary | -t] [--allow-private | -p] <interface> [URL]");
+}
+
+// Wrap for correct number of arguments
+int stdoutUpdate(struct IPAddr addr, void* data) {
+	return printAddr(addr);
 }
 
 int main(int const argc, char** argv) {
 	struct AddrFilter filter = {.allow_private = false};
-	int (* addr_processor)(struct IPAddr);
+	void * updater;
+	int (* addr_cb)(struct IPAddr, void*);
 
 	// Deal with options
 
 	const char short_opts[] = "vVh46pa";
 	struct option long_opts[] = {
 		{"allow-private", no_argument, 0, 'p'},
-		{"process-all", no_argument, 0, 'a'},
+		{"allow-temporary", no_argument, 0, 't'},
 		{"verbose", no_argument, 0, 'v'},
 		{"version", no_argument, 0, 'V'},
 		{"help", no_argument, 0, 'h'},
 	};
 	bool verbosity = 0;
-	bool process_all = false;
 	int opt_index = 0;
 	int opt;
 
 	while ((opt = getopt_long(argc, argv, short_opts, long_opts, &opt_index)) != -1) {
 		switch (opt) {
-		case 'a':
-			process_all = true;
-			break;
 		case 'v':
 			verbosity = 1;
 			break;
@@ -61,13 +63,16 @@ int main(int const argc, char** argv) {
 			puts(version);
 			return EXIT_SUCCESS;
 		case '4':
-			addFilterAf(&filter, AF_INET);
+			filter.ipv4 = true;
 			break;
 		case '6':
-			addFilterAf(&filter, AF_INET6);
+			filter.ipv6 = true;
 			break;
 		case 'p':
 			filter.allow_private = true;
+			break;
+		case 't':
+			filter.allow_temporary = true;
 			break;
 		case 'h':
 			printUsage();
@@ -79,18 +84,24 @@ int main(int const argc, char** argv) {
 	}
 
 	// Listen for all changes if none specified.
-	if (filter.num_af == 0){
-		addFilterAf(&filter, AF_INET);
-		addFilterAf(&filter, AF_INET6);
+	if (!(filter.ipv6 || filter.ipv4)) {
+		filter.ipv6 = true;
+		filter.ipv4 = true;
 	}
 
+	// Prepare updater, cleanup necessary if exiting after this point.
 	switch ((argc - optind)){
 	case 1:
-		addr_processor = printAddr;
+		updater = NULL;
+		addr_cb = stdoutUpdate;
 		break;
 	case 2:
-		setUrl(argv[optind + 1]);
-		addr_processor = webUpdate;
+		updater =  createUpdater();
+		if (updater == NULL) {
+			perror("Couldn't set up updating");
+			return EXIT_FAILURE;
+		}
+		addr_cb = webUpdate;
 		break;
 	default:
 		puts("Usage:\n");
@@ -103,25 +114,28 @@ int main(int const argc, char** argv) {
 	if (!filter.iface) {
 		fprintf(stderr, "Error resolving interface %s: %s\n",
 			iface_name, strerror(errno));
-		return EXIT_FAILURE;
+		goto cleanup_updater;
 	}
 
 	if (verbosity){
 		puts("Running in verbose mode.");
 		printf("Listening on interfaces: %s (#%d)\n", iface_name, filter.iface);
 		fputs("Listening for address changes in:", stdout);
-		if (checkFilterAf(filter, AF_INET))
-			printf(" IPv4");
-		if (checkFilterAf(filter, AF_INET6))
-			printf(" IPv6");
+		if (filter.ipv4) printf(" IPv4");
+		if (filter.ipv6) printf(" IPv6");
 		puts("");
 	}
 
-	// Prepare monitoring, cleanup necessary if exiting after this point.
-	struct MonitorState state;
-	if (!initState(filter, &state, 1024)){
-		perror("Couldn't set up for monitoring");
-		return EXIT_FAILURE;
+	int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+	if (epoll_fd < 0) {
+		perror("Couldn't create epoll");
+		goto cleanup_updater;
+	}
+
+	struct Monitor * monitor = createMonitor(&filter, 1024, epoll_fd);
+	if (monitor == NULL) {
+		perror("Couldn't set up monitoring");
+		goto cleanup_epoll;
 	}
 
 #ifdef WITH_SYSTEMD
@@ -129,67 +143,24 @@ int main(int const argc, char** argv) {
 #endif
 
 	// Main loop
-
-	pid_t child = -1;
-	struct IPAddr remote_addr = {.af = AF_UNSPEC}, prev_addr = {.af = AF_UNSPEC};
 	do {
-		struct IPAddr new_addr = nextAddr(filter, &state);
-		if (child != -1){
-			if (!process_all)
-				kill(child, termsig);
-
-			int status;
-			if (waitpid(child, &status, 0) == -1){
-				perror("Error waiting for child");
-				break;
-			}
-
-			if (WIFEXITED(status)){
-				if (WEXITSTATUS(status) != 0) {
-					fprintf(stderr, "Processing child exited with status %d\n", WEXITSTATUS(status));
-					break;
-				} else {
-					remote_addr = prev_addr;
-				}
-			} else if (WIFSIGNALED(status)){
-				if (WTERMSIG(status) != termsig){
-					fprintf(stderr, "Processing child terminated by signal %d\n", WTERMSIG(status));
-					break;
-				}
-			} else {
-				fputs("Processing child exited abnormally.", stderr);
-				break;
-			}
-
-			child = -1;
+		struct epoll_event events[1];
+		int nevents = epoll_wait(epoll_fd, events, NELEMS(events), -1);
+		if (nevents < 0) {
+			perror("Error waiting for events");
+			goto cleanup;
 		}
 
-		if (new_addr.af == AF_MAX){
-			perror("An error occurred while waiting for a new IP");
-			break;
-		} else if (new_addr.af == AF_UNSPEC) {
-			fputs("Netlink socket closed by kernel.", stderr);
-			break;
-		}
-
-		if (!process_all && addrEqual(remote_addr, new_addr)) {
-			continue;
-		}
-
-		// TODO: Could use exec
-		child = fork();
-		if (child == -1){
-			perror("Could not fork to process new address.");
-			break;
-		} else if (!child){
-			close(state.socket); // Make sure to set CLOEXEC if changing to exec.
-			return addr_processor(new_addr);
-		} else {
-			prev_addr = new_addr;
+		for (int i = 0; i < nevents; i++) {
+			events[i].data.ptr;
 		}
 	} while (true);
 
-	close(state.socket);
-	free(state.buf);
+cleanup:
+	destroyMonitor(monitor);
+cleanup_epoll:
+	close(epoll_fd);
+cleanup_updater:
+	destroyUpdater(updater);
 	return EXIT_FAILURE;
 }

@@ -1,22 +1,22 @@
-#ifndef _FILTER_H
-#define _FILTER_H
+#pragma once
 
 #include <linux/rtnetlink.h>
 #include <stdbool.h>
 #include <stddef.h>
 
-// Only AF_INET and AF_INET6
-#define DYNDNS_FILTER_MAX_AF 2
+#include "ipaddr.h"
 
 struct AddrFilter {
 	unsigned int iface;
-	enum rtnetlink_groups af[DYNDNS_FILTER_MAX_AF];
-	size_t num_af;
+
 	bool allow_private;
+	bool allow_temporary;
+
+	bool ipv4;
+	bool ipv6;
 };
 
-enum rtnetlink_groups afToRtnl(int af);
-bool checkFilterAf(struct AddrFilter filter, int af);
-bool addFilterAf(struct AddrFilter *filter, int af);
-
-#endif /*_FILTER_H*/
+bool filterMessage(struct AddrFilter const * filter, struct ifaddrmsg const * msg);
+bool filterAttr(struct AddrFilter const * filter,
+		struct ifaddrmsg const * msg,
+		struct rtattr const * attr);
