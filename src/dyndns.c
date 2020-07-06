@@ -113,7 +113,7 @@ int main(int const argc, char** argv) {
 
 	char const * const iface_name = argv[optind];
 	filter.iface = if_nametoindex(iface_name);
-	if (!filter.iface) {
+	if (filter.iface == 0) {
 		fprintf(stderr, "Error resolving interface %s: %s\n", iface_name, strerror(errno));
 		goto cleanup_updater;
 	}
@@ -132,7 +132,7 @@ int main(int const argc, char** argv) {
 		goto cleanup_updater;
 	}
 
-	Monitor_t monitor = createMonitor(&filter, 1024, epoll_fd, updater);
+	Monitor_t monitor = createMonitor(filter, 1024, epoll_fd, updater);
 	if (monitor == NULL) {
 		perror("Couldn't set up monitoring");
 		goto cleanup_epoll;
@@ -153,7 +153,10 @@ int main(int const argc, char** argv) {
 
 		for (int i = 0; i < nevents; i++) {
 			if (*(enum EpollTag*) events[i].data.ptr == EPOLL_MONITOR) {
-				processMessage(monitor);
+				if (processMessage(monitor) != 0) {
+					perror("Error processing message");
+					goto cleanup;
+				};
 			} else if (*(enum EpollTag*) events[i].data.ptr == EPOLL_UPDATER) {
 			}
 		}

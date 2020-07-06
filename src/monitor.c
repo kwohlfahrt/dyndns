@@ -87,7 +87,7 @@ static bool requestAddr(struct AddrFilter const * filter, ssize_t const sock){
 	return true;
 }
 
-Monitor_t createMonitor(struct AddrFilter const * filter, size_t buf_len, int epoll_fd, Updater_t updater) {
+Monitor_t createMonitor(struct AddrFilter const filter, size_t buf_len, int epoll_fd, Updater_t updater) {
 	Monitor_t data = malloc(sizeof(*data));
 	data->tag = EPOLL_MONITOR;
 
@@ -99,12 +99,13 @@ Monitor_t createMonitor(struct AddrFilter const * filter, size_t buf_len, int ep
 	monitor->socket = createSocket();
 	if (monitor->socket == -1) goto cleanup;
 
-	if (filter->ipv4) {
+	monitor->filter = filter;
+	if (filter.ipv4) {
 		enum rtnetlink_groups group = RTNLGRP_IPV4_IFADDR;
 		if (setsockopt(monitor->socket, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &group, sizeof(group)) == -1) goto cleanup;
 	}
 
-	if (filter->ipv6) {
+	if (filter.ipv6) {
 		enum rtnetlink_groups group = RTNLGRP_IPV6_IFADDR;
 		if (setsockopt(monitor->socket, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &group, sizeof(group)) == -1) goto cleanup;
 	}
@@ -120,7 +121,7 @@ Monitor_t createMonitor(struct AddrFilter const * filter, size_t buf_len, int ep
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, monitor->socket, &event) == -1) goto cleanup;
 	monitor->epoll_fd = epoll_fd;
 
-	if (!requestAddr(filter, monitor->socket)) goto cleanup;
+	if (!requestAddr(&filter, monitor->socket)) goto cleanup;
 
 	return data;
 cleanup:
@@ -157,7 +158,7 @@ int processMessage(Monitor_t data) {
 	} else if (len == 0) {
 		// Closed by kernel
 		return -2;
-	} else if ((size_t) len < monitor->buf_len) {
+	} else if ((size_t) len > monitor->buf_len) {
 		free(monitor->buf);
 		monitor->buf = malloc(len);
 		monitor->buf_len = (size_t) len;
