@@ -1,4 +1,4 @@
-src = ['dyndns.c', 'filter.c', 'ipaddr.c', 'monitor.c', 'strlcpy.c', 'web_updater.c']
+src = ['dyndns.c', 'filter.c', 'ipaddr.c', 'monitor.c', 'strlcpy.c', 'updater.c', 'web_updater.c']
 curl = dependency('libcurl')
 dependencies = [curl]
 if get_option('with-systemd')

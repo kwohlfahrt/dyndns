@@ -22,22 +22,6 @@
 #include "filter.h"
 #include "util.h"
 
-struct Updater {
-	CURLM* multi_handle;
-	CURL* handle;
-
-	char const* template;
-	char* url;
-	size_t url_len;
-
-	int* timeout;
-};
-
-struct EpollData {
-	enum EpollTag tag;
-	struct Updater updater;
-};
-
 char const * const ip_tag = "<ipaddr>";
 
 bool templateUrl(struct IPAddr address, char const * src, char * dst, size_t max_size){
@@ -82,25 +66,30 @@ static size_t discard(__attribute__((unused)) char *ptr,
 }
 
 static int socket_cb(CURL* handle, curl_socket_t s, int what, void *cb_data, void * socketp) {
-	struct EpollData * data = (struct EpollData *) cb_data;
+	struct WebUpdater * updater = (struct WebUpdater *) cb_data;
 
 	return 0;
 }
 
 static int timer_cb(CURLM* multi_handle, long timeout, void* cb_data) {
-	struct EpollData * data = (struct EpollData *) cb_data;
+	struct WebUpdater * updater = (struct WebUpdater *) cb_data;
 
 	if (timeout == -1) {
+		// Get rid of timeout
+		*updater->timeout = -1;
+	} else {
+		*updater->timeout = timeout;
 	}
 
 	return 0;
 }
 
-Updater_t createUpdater(char const * template, int * timeout) {
-	struct EpollData * data = malloc(sizeof(*data));
-	data->tag = TAG_UPDATER;
+Updater_t createWebUpdater(char const * template, int * timeout) {
+	Updater_t data = malloc(sizeof(*data));
+	data->tag = EPOLL_UPDATER;
 
-	struct Updater * updater = &data->updater;
+	data->data.tag = WEB_UPDATER;
+	struct WebUpdater * updater = &data->data.data.web;
 	updater->multi_handle = NULL;
 	updater->handle = NULL;
 	updater->url = NULL;
@@ -125,13 +114,12 @@ Updater_t createUpdater(char const * template, int * timeout) {
 	return data;
 
 cleanup:
-	destroyUpdater(data);
+	destroyWebUpdater(updater);
+	free(data);
 	return NULL;
 };
 
-void destroyUpdater(Updater_t data) {
-	struct Updater * updater = &data->updater;
-
+void destroyWebUpdater(struct WebUpdater * updater) {
 	if (updater->multi_handle != NULL) curl_multi_cleanup(updater->multi_handle);
 	updater->multi_handle = NULL;
 	if (updater->handle != NULL) curl_easy_cleanup(updater->handle);
@@ -140,9 +128,7 @@ void destroyUpdater(Updater_t data) {
 	updater->url = NULL;
 };
 
-int webUpdate(struct IPAddr const addr, void* data){
-	struct Updater * updater = (struct Updater *) data;
-
+int webUpdate(struct WebUpdater * updater, struct IPAddr const addr){
 	if (!templateUrl(addr, updater->template, updater->url, updater->url_len)) return -1;
 	if (curl_easy_setopt(updater->handle, CURLOPT_WRITEFUNCTION, discard) != CURLE_OK) return -1;
 	if (curl_easy_setopt(updater->handle, CURLOPT_URL, updater->url) != CURLE_OK) return -1;
@@ -153,8 +139,10 @@ int webUpdate(struct IPAddr const addr, void* data){
 
 	// If interface is recently brought up, this will fail with CURLE_COULDNT_RESOLVE_HOST
 	// because NetworkManager hasn't set any DNS servers, so we will wait for one.
+	/*
 	if (retval == CURLE_COULDNT_RESOLVE_HOST){
 	}
+	*/
 
 	return 0;
 }

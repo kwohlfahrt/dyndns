@@ -13,8 +13,7 @@ bool filterMessage(struct AddrFilter const * filter, struct ifaddrmsg const * ms
 bool filterAttr(struct AddrFilter const * filter,
 		struct ifaddrmsg const * msg,
 		struct rtattr const * attr){
-	if (attr->rta_type != IFA_ADDRESS)
-		return false;
+	if (attr->rta_type != IFA_ADDRESS) return false;
 	struct IPAddr addr = addrFromAttr(msg, attr);
 	return filter->allow_private || !addrIsPrivate(addr);
 }

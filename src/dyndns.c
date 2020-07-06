@@ -16,6 +16,7 @@
 #include "ipaddr.h"
 #include "monitor.h"
 #include "web_updater.h"
+#include "updater.h"
 
 #ifdef WITH_SYSTEMD
 #include <systemd/sd-daemon.h>
@@ -30,19 +31,13 @@ static void printUsage(){
 	     "dyndns [-v] [-46] [--allow-temporary | -t] [--allow-private | -p] <interface> [URL]");
 }
 
-// Wrap for correct number of arguments
-int stdoutUpdate(struct IPAddr addr, void* data) {
-	return printAddr(addr);
-}
-
 int main(int const argc, char** argv) {
 	struct AddrFilter filter = {.allow_private = false};
-	void * updater;
-	int (* addr_cb)(struct IPAddr, void*);
+	Updater_t updater;
 
 	// Deal with options
 
-	const char short_opts[] = "vVh46pa";
+	const char short_opts[] = "vVh46pt";
 	struct option long_opts[] = {
 		{"allow-private", no_argument, 0, 'p'},
 		{"allow-temporary", no_argument, 0, 't'},
@@ -52,6 +47,7 @@ int main(int const argc, char** argv) {
 	};
 	bool verbosity = 0;
 	int opt_index = 0;
+	int epoll_timeout = -1;
 	int opt;
 
 	while ((opt = getopt_long(argc, argv, short_opts, long_opts, &opt_index)) != -1) {
@@ -89,19 +85,20 @@ int main(int const argc, char** argv) {
 		filter.ipv4 = true;
 	}
 
+	if (verbosity){
+		puts("Running in verbose mode.");
+	}
+
 	// Prepare updater, cleanup necessary if exiting after this point.
 	switch ((argc - optind)){
 	case 1:
-		updater = NULL;
-		addr_cb = stdoutUpdate;
+		updater = createPrintUpdater();
+		puts("Printing addresses to stdout.");
 		break;
 	case 2:
-		updater =  createUpdater();
-		if (updater == NULL) {
-			perror("Couldn't set up updating");
-			return EXIT_FAILURE;
-		}
-		addr_cb = webUpdate;
+		updater = createWebUpdater(argv[optind + 1], &epoll_timeout);
+		printf("Updating URL %s with addresses.", argv[optind + 1]);
+		puts("");
 		break;
 	default:
 		puts("Usage:\n");
@@ -109,16 +106,19 @@ int main(int const argc, char** argv) {
 		return EXIT_USAGE;
 	}
 
+	if (updater == NULL) {
+		perror("Couldn't set up updating");
+		return EXIT_FAILURE;
+	}
+
 	char const * const iface_name = argv[optind];
 	filter.iface = if_nametoindex(iface_name);
 	if (!filter.iface) {
-		fprintf(stderr, "Error resolving interface %s: %s\n",
-			iface_name, strerror(errno));
+		fprintf(stderr, "Error resolving interface %s: %s\n", iface_name, strerror(errno));
 		goto cleanup_updater;
 	}
 
 	if (verbosity){
-		puts("Running in verbose mode.");
 		printf("Listening on interfaces: %s (#%d)\n", iface_name, filter.iface);
 		fputs("Listening for address changes in:", stdout);
 		if (filter.ipv4) printf(" IPv4");
@@ -132,7 +132,7 @@ int main(int const argc, char** argv) {
 		goto cleanup_updater;
 	}
 
-	struct Monitor * monitor = createMonitor(&filter, 1024, epoll_fd);
+	Monitor_t monitor = createMonitor(&filter, 1024, epoll_fd, updater);
 	if (monitor == NULL) {
 		perror("Couldn't set up monitoring");
 		goto cleanup_epoll;
@@ -144,7 +144,7 @@ int main(int const argc, char** argv) {
 
 	// Main loop
 	do {
-		struct epoll_event events[1];
+		struct epoll_event events[2];
 		int nevents = epoll_wait(epoll_fd, events, NELEMS(events), -1);
 		if (nevents < 0) {
 			perror("Error waiting for events");
@@ -152,7 +152,10 @@ int main(int const argc, char** argv) {
 		}
 
 		for (int i = 0; i < nevents; i++) {
-			events[i].data.ptr;
+			if (*(enum EpollTag*) events[i].data.ptr == EPOLL_MONITOR) {
+				processMessage(monitor);
+			} else if (*(enum EpollTag*) events[i].data.ptr == EPOLL_UPDATER) {
+			}
 		}
 	} while (true);
 

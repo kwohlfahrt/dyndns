@@ -24,11 +24,13 @@ struct Monitor {
 	char * buf;
 	size_t buf_len;
 	int epoll_fd;
+
+	Updater_t updater;
 };
 
-struct EpollData {
+struct EpollMonitor {
 	enum EpollTag tag;
-	struct Monitor monitor;
+	struct Monitor data;
 };
 
 static ssize_t createSocket(){
@@ -85,11 +87,12 @@ static bool requestAddr(struct AddrFilter const * filter, ssize_t const sock){
 	return true;
 }
 
-Monitor_t createMonitor(struct AddrFilter const * filter, size_t buf_len, int epoll_fd) {
-	struct EpollData * data = malloc(sizeof(*data));
-	data->tag = TAG_MONITOR;
+Monitor_t createMonitor(struct AddrFilter const * filter, size_t buf_len, int epoll_fd, Updater_t updater) {
+	Monitor_t data = malloc(sizeof(*data));
+	data->tag = EPOLL_MONITOR;
 
-	struct Monitor * monitor = &data->monitor;
+	struct Monitor * monitor = &data->data;
+	monitor->updater = updater;
 	monitor->socket = -1;
 	monitor->epoll_fd = -1;
 
@@ -126,7 +129,7 @@ cleanup:
 }
 
 void destroyMonitor(Monitor_t data) {
-	struct Monitor * monitor = &data->monitor;
+	struct Monitor * monitor = &data->data;
 
 	if (monitor->epoll_fd < 0) {
 		epoll_ctl(monitor->epoll_fd, EPOLL_CTL_DEL, monitor->socket, NULL);
@@ -139,98 +142,62 @@ void destroyMonitor(Monitor_t data) {
 		free(monitor->buf);
 		monitor->buf = NULL;
 	}
+
+	free(data);
 	return;
 }
 
-ssize_t nextMessage(struct AddrFilter const * filter, ssize_t const socket,
-                    char * * const buf, size_t * const buf_len){
-	ssize_t len = recv(socket, *buf, *buf_len, MSG_TRUNC);
-	if (len <= 0 ) {
-		// Error
-		return len;
-	} else if ((size_t) len > *buf_len){
-		// Reallocate with sufficient size
-		*buf_len = (size_t) len;
-		free(*buf);
-		*buf = malloc(*buf_len);
+int processMessage(Monitor_t data) {
+	struct Monitor * monitor = &data->data;
+
+	ssize_t len = recv(monitor->socket, monitor->buf, monitor->buf_len, MSG_TRUNC);
+	if (len == -1) {
+		// Error reading socket
+		return -1;
+	} else if (len == 0) {
+		// Closed by kernel
+		return -2;
+	} else if ((size_t) len < monitor->buf_len) {
+		free(monitor->buf);
+		monitor->buf = malloc(len);
+		monitor->buf_len = (size_t) len;
 
 		// clear socket, else get EBUSY on requestAddr
-		while (recv(socket, *buf, *buf_len, MSG_DONTWAIT) != -1)
+		while (recv(monitor->socket, monitor->buf, monitor->buf_len, MSG_DONTWAIT) != -1)
 			continue;
 		if (errno != EAGAIN && errno != EWOULDBLOCK)
 			return -1;
 
-		if (!requestAddr(filter, socket))
-			return -1;
-
-		return nextMessage(filter, socket, buf, buf_len);
-	} else {
-		return len;
+		// May have missed data, re-request
+		return requestAddr(&monitor->filter, monitor->socket);
 	}
-}
 
-/*
-// Returns AF_MAX (with errno set) if error, AF_UNSPEC if no more addrs (socket closed)
-struct IPAddr nextAddr(struct AddrFilter const filter, struct Monitor * const state){
-	// NLMSG_OK checks length first, so safe to call with state->nlh == NULL iff
-	// state->nlmsg_len < (int) sizeof(struct nlmsghdr)
-	if (NLMSG_OK(state->nlh, state->nlmsg_len) && (state->nlh->nlmsg_type != NLMSG_DONE)){
-		struct nlmsghdr * nlh = state->nlh;
-		state->nlh = NLMSG_NEXT(state->nlh, state->nlmsg_len);
-		switch(nlh->nlmsg_type){
+	struct nlmsghdr * nlh;
+	size_t nlmsg_len;
+	for (nlh = (struct nlmsghdr*) monitor->buf, nlmsg_len = monitor->buf_len;
+	     NLMSG_OK(nlh, nlmsg_len) && nlh->nlmsg_type != NLMSG_DONE;
+	     nlh = NLMSG_NEXT(nlh, nlmsg_len)) {
+		switch (nlh->nlmsg_type) {
 		case NLMSG_ERROR:
 			errno = -((struct nlmsgerr *) NLMSG_DATA(nlh))->error;
-			struct IPAddr addr = {.af = AF_MAX};
-			return addr;
+			return  -1;
 		case RTM_NEWADDR: {
 			struct ifaddrmsg * ifa = (struct ifaddrmsg *) NLMSG_DATA(nlh);
-			if (!filterIfAddrMsg(*ifa, filter))
-				return nextAddr(filter, state);
-			{
+			if (!filterMessage(&monitor->filter, ifa)) break;
+
 			struct rtattr * rth;
 			size_t rtmsg_len;
 			for (rth = IFA_RTA(ifa), rtmsg_len = IFA_PAYLOAD(nlh);
-			     RTA_OK(rth, rtmsg_len); RTA_NEXT(rth, rtmsg_len)){
-				if (rth->rta_type != IFA_ADDRESS)
+			     RTA_OK(rth, rtmsg_len);
+			     RTA_NEXT(rth, rtmsg_len)) {
+				if (!filterAttr(&monitor->filter, ifa, rth)) {
 					continue;
-				// family checked in filterIfAddrMsg, so always valid.
-				struct IPAddr addr = {.af = ifa->ifa_family};
-				switch (ifa->ifa_family) {
-				case AF_INET:
-					addr.ipv4 = *((struct in_addr *) RTA_DATA(rth));
-					break;
-				case AF_INET6:
-					addr.ipv6 = *((struct in6_addr *) RTA_DATA(rth));
-					break;
 				}
-				if (addrIsPrivate(addr) && !filter.allow_private)
-					return nextAddr(filter, state);
-				else
-					return addr;
+				struct IPAddr addr = addrFromAttr(ifa, rth);
+				update(monitor->updater, addr);
 			}
-			}
-			// Recieved RTM_NEWADDR without any address.
-			errno = EBADMSG;
-			struct IPAddr addr = {.af = AF_MAX};
-			return addr;
-		}
-		default:
-			return nextAddr(filter, state);
-		}
-	} else {
-		state->nlmsg_len = nextMessage(filter, state->socket, &state->buf, &state->buf_len);
-		if (state->nlmsg_len == 0) {
-			// Socket closed by kernel
-			struct IPAddr addr = {.af = AF_UNSPEC};
-			return addr;
-		} else if (state->nlmsg_len < 0) {
-			// Socket error
-			struct IPAddr addr = {.af = AF_MAX};
-			return addr;
-		} else  {
-			state->nlh = (struct nlmsghdr *) state->buf;
-			return nextAddr(filter, state);
-		}
+		}}
 	}
+
+	return 0;
 }
-*/
