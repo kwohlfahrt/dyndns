@@ -152,7 +152,7 @@ int main(int const argc, char** argv) {
 		} else if (nevents == 0) {
 			if (handleTimeout(updater) != 0) {
 				goto cleanup;
-			};
+			}
 		}
 
 		for (int i = 0; i < nevents; i++) {
@@ -161,12 +161,12 @@ int main(int const argc, char** argv) {
 				if (processMessage(monitor) != 0) {
 					perror("Error processing message");
 					goto cleanup;
-				};
+				}
 			} else if (*(enum EpollTag*) events[i].data.ptr == EPOLL_UPDATER) {
 				if (handleMessage(updater, &events[i]) != 0) {
 					perror("Error processing update");
 					goto cleanup;
-				};
+				}
 			}
 		}
 	} while (true);

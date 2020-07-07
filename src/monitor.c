@@ -189,11 +189,10 @@ int processMessage(Monitor_t data) {
 			for (rth = IFA_RTA(ifa), rtmsg_len = IFA_PAYLOAD(nlh);
 			     RTA_OK(rth, rtmsg_len);
 			     RTA_NEXT(rth, rtmsg_len)) {
-				if (!filterAttr(&monitor->filter, ifa, rth)) {
-					continue;
-				}
+				if (!filterAttr(&monitor->filter, ifa, rth)) continue;
 				struct IPAddr addr = addrFromAttr(ifa, rth);
-				update(monitor->updater, addr);
+				int result = update(monitor->updater, addr);
+				if (result != 0) return result;
 			}
 		}}
 	}

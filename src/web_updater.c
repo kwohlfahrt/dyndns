@@ -81,7 +81,7 @@ static int socket_cb(CURL* handle, curl_socket_t socket, int what, void *cb_data
 		}
 
 		if (socket_data == NULL) {
-			//if (curl_multi_assign(updater->multi_handle, socket, socket_data) != CURLM_OK) return -1;
+			if (curl_multi_assign(updater->multi_handle, socket, updater) != CURLM_OK) return -1;
 			return epoll_ctl(updater->epoll_fd, EPOLL_CTL_ADD, socket, &ev);
 		} else {
 			return epoll_ctl(updater->epoll_fd, EPOLL_CTL_MOD, socket, &ev);
@@ -117,11 +117,15 @@ Updater_t createWebUpdater(char const * template, int * timeout) {
 
 	size_t url_len = strlen(template) + 1;
 	char const * tag_pos = template;
+	size_t tag_len = strlen(ip_tag);
 	while ((tag_pos = strstr(tag_pos, ip_tag)) != NULL) {
 		// Subtract the trailing NULL
 		url_len += INET6_ADDRSTRLEN - 1;
+		tag_pos += tag_len;
 	}
 	updater->url = malloc(url_len);
+	if (updater->url == NULL) goto cleanup;
+	updater->url_len = url_len;
 
 	if ((updater->multi_handle = curl_multi_init()) == NULL) goto cleanup;
 	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_SOCKETDATA, updater) != CURLM_OK) goto cleanup;
@@ -151,20 +155,25 @@ static int completeRequests(struct WebUpdater * updater, int fd, int events) {
 	int prev_active = updater->n_active;
 	if (curl_multi_socket_action(updater->multi_handle, fd, events, &updater->n_active) != CURLM_OK) return -1;
 	if (prev_active > updater->n_active) {
-		for (CURLMsg * msg = curl_multi_info_read(updater->multi_handle, NULL);
-		     msg != NULL; msg = curl_multi_info_read(updater->multi_handle, NULL)) {
+		int nmsgs;
+		for (CURLMsg * msg = curl_multi_info_read(updater->multi_handle, &nmsgs);
+		     msg != NULL; msg = curl_multi_info_read(updater->multi_handle, &nmsgs)) {
 			if (msg->msg != CURLMSG_DONE) {
 				continue;
 			}
 			CURL* e = msg->easy_handle;
 			CURLcode result = msg->data.result;
 			curl_multi_remove_handle(updater->multi_handle, e);
+			char * url = NULL;
+			curl_easy_getinfo(e, CURLINFO_EFFECTIVE_URL, &url);
 			if (result == CURLE_OK) {
+				if (url != NULL) printf("Fetched: %s\n", url);
 				return 0;
 			} else if (result == CURLE_COULDNT_RESOLVE_HOST) {
 				// TODO: DNS might not be available shortly after network comes up, so retry
 				return -1;
 			} else {
+				if (url != NULL) printf("Failed to fetch: %s\n", url);
 				return -1;
 			}
 		}
@@ -196,8 +205,9 @@ int webUpdate(struct WebUpdater * updater, struct IPAddr const addr){
 	if (curl_easy_setopt(updater->handle, CURLOPT_WRITEFUNCTION, discard) != CURLE_OK) return -1;
 	if (curl_easy_setopt(updater->handle, CURLOPT_URL, updater->url) != CURLE_OK) return -1;
 	if (curl_multi_add_handle(updater->multi_handle, updater->handle) != CURLM_OK) return -1;
+	printf("Fetching address: %s\n", updater->url);
 
-	if (curl_multi_socket_action(updater->multi_handle, CURL_SOCKET_TIMEOUT, 0, NULL) != CURLM_OK) return -1;
+	if (curl_multi_socket_action(updater->multi_handle, CURL_SOCKET_TIMEOUT, 0, &updater->n_active) != CURLM_OK) return -1;
 
 	return 0;
 }
