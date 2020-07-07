@@ -147,11 +147,34 @@ void destroyWebUpdater(struct WebUpdater * updater) {
 	updater->url = NULL;
 };
 
-int handleWebTimeout(struct WebUpdater * updater) {
-	int n_active;
-	if (curl_multi_socket_action(updater->multi_handle, CURL_SOCKET_TIMEOUT, 0, &n_active) != CURLM_OK) return -1;
-	updater->n_active = n_active;
+static int completeRequests(struct WebUpdater * updater, int fd, int events) {
+	int prev_active = updater->n_active;
+	if (curl_multi_socket_action(updater->multi_handle, fd, events, &updater->n_active) != CURLM_OK) return -1;
+	if (prev_active > updater->n_active) {
+		for (CURLMsg * msg = curl_multi_info_read(updater->multi_handle, NULL);
+		     msg != NULL; msg = curl_multi_info_read(updater->multi_handle, NULL)) {
+			if (msg->msg != CURLMSG_DONE) {
+				continue;
+			}
+			CURL* e = msg->easy_handle;
+			CURLcode result = msg->data.result;
+			curl_multi_remove_handle(updater->multi_handle, e);
+			if (result == CURLE_OK) {
+				return 0;
+			} else if (result == CURLE_COULDNT_RESOLVE_HOST) {
+				// TODO: DNS might not be available shortly after network comes up, so retry
+				return -1;
+			} else {
+				return -1;
+			}
+		}
+		return 0;
+	}
 	return 0;
+}
+
+int handleWebTimeout(struct WebUpdater * updater) {
+	return completeRequests(updater, CURL_SOCKET_TIMEOUT, 0);
 }
 
 int handleWebMessage(struct WebUpdater * updater, int fd, struct epoll_event * event) {
@@ -162,26 +185,19 @@ int handleWebMessage(struct WebUpdater * updater, int fd, struct epoll_event * e
 	if (event->events & EPOLLOUT) {
 		events |= CURL_CSELECT_OUT;
 	}
-	int n_active;
-	if (curl_multi_socket_action(updater->multi_handle, fd, events, &n_active) != CURLM_OK) return -1;
-	updater->n_active = n_active;
-	return 0;
+	return completeRequests(updater, fd, events);
 }
 
 int webUpdate(struct WebUpdater * updater, struct IPAddr const addr){
 	if (!templateUrl(addr, updater->template, updater->url, updater->url_len)) return -1;
+	if (updater->n_active > 0) {
+		curl_multi_remove_handle(updater->multi_handle, updater->handle);
+	}
 	if (curl_easy_setopt(updater->handle, CURLOPT_WRITEFUNCTION, discard) != CURLE_OK) return -1;
 	if (curl_easy_setopt(updater->handle, CURLOPT_URL, updater->url) != CURLE_OK) return -1;
 	if (curl_multi_add_handle(updater->multi_handle, updater->handle) != CURLM_OK) return -1;
 
-	int n_active;
-	if (curl_multi_socket_action(updater->multi_handle, CURL_SOCKET_TIMEOUT, 0, &n_active) != CURLM_OK) return -1;
+	if (curl_multi_socket_action(updater->multi_handle, CURL_SOCKET_TIMEOUT, 0, NULL) != CURLM_OK) return -1;
 
-	// If interface is recently brought up, this will fail with CURLE_COULDNT_RESOLVE_HOST
-	// because NetworkManager hasn't set any DNS servers, so we will wait for one.
-	/*
-	if (retval == CURLE_COULDNT_RESOLVE_HOST){
-	}
-	*/
 	return 0;
 }
