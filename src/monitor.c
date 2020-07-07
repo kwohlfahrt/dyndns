@@ -20,7 +20,6 @@
 
 struct Monitor {
 	struct AddrFilter filter;
-	ssize_t socket;
 	char * buf;
 	size_t buf_len;
 	int epoll_fd;
@@ -30,6 +29,7 @@ struct Monitor {
 
 struct EpollMonitor {
 	enum EpollTag tag;
+	ssize_t socket;
 	struct Monitor data;
 };
 
@@ -90,24 +90,24 @@ static bool requestAddr(struct AddrFilter const * filter, ssize_t const sock){
 Monitor_t createMonitor(struct AddrFilter const filter, size_t buf_len, int epoll_fd, Updater_t updater) {
 	Monitor_t data = malloc(sizeof(*data));
 	data->tag = EPOLL_MONITOR;
+	data->socket = -1;
 
 	struct Monitor * monitor = &data->data;
 	monitor->updater = updater;
-	monitor->socket = -1;
 	monitor->epoll_fd = -1;
 
-	monitor->socket = createSocket();
-	if (monitor->socket == -1) goto cleanup;
+	data->socket = createSocket();
+	if (data->socket == -1) goto cleanup;
 
 	monitor->filter = filter;
 	if (filter.ipv4) {
 		enum rtnetlink_groups group = RTNLGRP_IPV4_IFADDR;
-		if (setsockopt(monitor->socket, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &group, sizeof(group)) == -1) goto cleanup;
+		if (setsockopt(data->socket, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &group, sizeof(group)) == -1) goto cleanup;
 	}
 
 	if (filter.ipv6) {
 		enum rtnetlink_groups group = RTNLGRP_IPV6_IFADDR;
-		if (setsockopt(monitor->socket, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &group, sizeof(group)) == -1) goto cleanup;
+		if (setsockopt(data->socket, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &group, sizeof(group)) == -1) goto cleanup;
 	}
 
 	monitor->buf = malloc(buf_len);
@@ -118,10 +118,10 @@ Monitor_t createMonitor(struct AddrFilter const filter, size_t buf_len, int epol
 		.events = EPOLLIN,
 		.data = { .ptr = data },
 	};
-	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, monitor->socket, &event) == -1) goto cleanup;
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, data->socket, &event) == -1) goto cleanup;
 	monitor->epoll_fd = epoll_fd;
 
-	if (!requestAddr(&filter, monitor->socket)) goto cleanup;
+	if (!requestAddr(&filter, data->socket)) goto cleanup;
 
 	return data;
 cleanup:
@@ -133,10 +133,10 @@ void destroyMonitor(Monitor_t data) {
 	struct Monitor * monitor = &data->data;
 
 	if (monitor->epoll_fd < 0) {
-		epoll_ctl(monitor->epoll_fd, EPOLL_CTL_DEL, monitor->socket, NULL);
+		epoll_ctl(monitor->epoll_fd, EPOLL_CTL_DEL, data->socket, NULL);
 	}
-	if (monitor->socket < 0) {
-		close(monitor->socket);
+	if (data->socket < 0) {
+		close(data->socket);
 	}
 	if (monitor->buf != NULL) {
 		monitor->buf_len = 0;
@@ -151,7 +151,7 @@ void destroyMonitor(Monitor_t data) {
 int processMessage(Monitor_t data) {
 	struct Monitor * monitor = &data->data;
 
-	ssize_t len = recv(monitor->socket, monitor->buf, monitor->buf_len, MSG_TRUNC);
+	ssize_t len = recv(data->socket, monitor->buf, monitor->buf_len, MSG_TRUNC);
 	if (len == -1) {
 		// Error reading socket
 		return -1;
@@ -164,13 +164,13 @@ int processMessage(Monitor_t data) {
 		monitor->buf_len = (size_t) len;
 
 		// clear socket, else get EBUSY on requestAddr
-		while (recv(monitor->socket, monitor->buf, monitor->buf_len, MSG_DONTWAIT) != -1)
+		while (recv(data->socket, monitor->buf, monitor->buf_len, MSG_DONTWAIT) != -1)
 			continue;
 		if (errno != EAGAIN && errno != EWOULDBLOCK)
 			return -1;
 
 		// May have missed data, re-request
-		return requestAddr(&monitor->filter, monitor->socket);
+		return requestAddr(&monitor->filter, data->socket);
 	}
 
 	struct nlmsghdr * nlh;

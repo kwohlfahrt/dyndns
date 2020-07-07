@@ -145,19 +145,28 @@ int main(int const argc, char** argv) {
 	// Main loop
 	do {
 		struct epoll_event events[2];
-		int nevents = epoll_wait(epoll_fd, events, NELEMS(events), -1);
+		int nevents = epoll_wait(epoll_fd, events, NELEMS(events), epoll_timeout);
 		if (nevents < 0) {
 			perror("Error waiting for events");
 			goto cleanup;
+		} else if (nevents == 0) {
+			if (handleTimeout(updater) != 0) {
+				goto cleanup;
+			};
 		}
 
 		for (int i = 0; i < nevents; i++) {
+			// Could pull the monitor/updater out of the epoll event, but we only have one so...
 			if (*(enum EpollTag*) events[i].data.ptr == EPOLL_MONITOR) {
 				if (processMessage(monitor) != 0) {
 					perror("Error processing message");
 					goto cleanup;
 				};
 			} else if (*(enum EpollTag*) events[i].data.ptr == EPOLL_UPDATER) {
+				if (handleMessage(updater, &events[i]) != 0) {
+					perror("Error processing update");
+					goto cleanup;
+				};
 			}
 		}
 	} while (true);

@@ -1,11 +1,15 @@
 #pragma once
 
 #include <curl/curl.h>
+#include <sys/epoll.h>
 #include "ipaddr.h"
 
 struct WebUpdater {
 	CURLM* multi_handle;
 	CURL* handle;
+	int n_active;
+
+	int epoll_fd;
 
 	char const* template;
 	char* url;
@@ -16,6 +20,8 @@ struct WebUpdater {
 
 void destroyWebUpdater(struct WebUpdater * updater);
 int webUpdate(struct WebUpdater * updater, struct IPAddr addr);
+int handleWebMessage(struct WebUpdater * updater, int fd, struct epoll_event * ev);
+int handleWebTimeout(struct WebUpdater * updater);
 
 #include "updater.h"
 

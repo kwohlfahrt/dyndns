@@ -15,6 +15,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/inotify.h>
+#include <sys/epoll.h>
 #include <sys/select.h>
 
 #include "web_updater.h"
@@ -65,10 +66,27 @@ static size_t discard(__attribute__((unused)) char *ptr,
 	return size * nmemb;
 }
 
-static int socket_cb(CURL* handle, curl_socket_t s, int what, void *cb_data, void * socketp) {
+static int socket_cb(CURL* handle, curl_socket_t socket, int what, void *cb_data, void * socket_data) {
 	struct WebUpdater * updater = (struct WebUpdater *) cb_data;
 
-	return 0;
+	if (what == CURL_POLL_REMOVE) {
+		return epoll_ctl(updater->epoll_fd, EPOLL_CTL_DEL, socket, NULL);
+	} else {
+		struct epoll_event ev = { .events = 0 };
+		if (what == CURL_POLL_IN || what == CURL_POLL_INOUT) {
+			ev.events |= EPOLLIN;
+		}
+		if (what == CURL_POLL_OUT || what == CURL_POLL_INOUT) {
+			ev.events |= EPOLLOUT;
+		}
+
+		if (socket_data == NULL) {
+			//if (curl_multi_assign(updater->multi_handle, socket, socket_data) != CURLM_OK) return -1;
+			return epoll_ctl(updater->epoll_fd, EPOLL_CTL_ADD, socket, &ev);
+		} else {
+			return epoll_ctl(updater->epoll_fd, EPOLL_CTL_MOD, socket, &ev);
+		}
+	};
 }
 
 static int timer_cb(CURLM* multi_handle, long timeout, void* cb_data) {
@@ -95,6 +113,7 @@ Updater_t createWebUpdater(char const * template, int * timeout) {
 	updater->url = NULL;
 	updater->template = template;
 	updater->timeout = timeout;
+	updater->n_active = 0;
 
 	size_t url_len = strlen(template) + 1;
 	char const * tag_pos = template;
@@ -128,6 +147,27 @@ void destroyWebUpdater(struct WebUpdater * updater) {
 	updater->url = NULL;
 };
 
+int handleWebTimeout(struct WebUpdater * updater) {
+	int n_active;
+	if (curl_multi_socket_action(updater->multi_handle, CURL_SOCKET_TIMEOUT, 0, &n_active) != CURLM_OK) return -1;
+	updater->n_active = n_active;
+	return 0;
+}
+
+int handleWebMessage(struct WebUpdater * updater, int fd, struct epoll_event * event) {
+	int events = 0;
+	if (event->events & EPOLLIN) {
+		events |= CURL_CSELECT_IN;
+	}
+	if (event->events & EPOLLOUT) {
+		events |= CURL_CSELECT_OUT;
+	}
+	int n_active;
+	if (curl_multi_socket_action(updater->multi_handle, fd, events, &n_active) != CURLM_OK) return -1;
+	updater->n_active = n_active;
+	return 0;
+}
+
 int webUpdate(struct WebUpdater * updater, struct IPAddr const addr){
 	if (!templateUrl(addr, updater->template, updater->url, updater->url_len)) return -1;
 	if (curl_easy_setopt(updater->handle, CURLOPT_WRITEFUNCTION, discard) != CURLE_OK) return -1;
@@ -143,6 +183,5 @@ int webUpdate(struct WebUpdater * updater, struct IPAddr const addr){
 	if (retval == CURLE_COULDNT_RESOLVE_HOST){
 	}
 	*/
-
 	return 0;
 }
