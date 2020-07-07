@@ -76,10 +76,14 @@ int printAddr(struct IPAddr const address){
 	char ip_str[INET6_ADDRSTRLEN];
 	if (!inet_ntop(address.af, &address, ip_str, sizeof(ip_str))){
 		perror("Error converting IP to string");
-		return false;
+		return -1;
 	}
 
-	return puts(ip_str);
+	if (puts(ip_str) != EOF) {
+		return 0;
+	} else {
+		return -1;
+	}
 }
 
 // Might use a different return code for invalid result, save checking/setting errno

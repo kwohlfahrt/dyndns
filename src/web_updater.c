@@ -67,12 +67,15 @@ static size_t discard(__attribute__((unused)) char *ptr,
 }
 
 static int socket_cb(CURL* handle, curl_socket_t socket, int what, void *cb_data, void * socket_data) {
-	struct WebUpdater * updater = (struct WebUpdater *) cb_data;
+	struct WebUpdater * updater = &((Updater_t) cb_data)->data.data.web;
 
 	if (what == CURL_POLL_REMOVE) {
 		return epoll_ctl(updater->epoll_fd, EPOLL_CTL_DEL, socket, NULL);
 	} else {
-		struct epoll_event ev = { .events = 0 };
+		struct epoll_event ev = {
+			.events = 0,
+			.data.ptr = cb_data,
+		};
 		if (what == CURL_POLL_IN || what == CURL_POLL_INOUT) {
 			ev.events |= EPOLLIN;
 		}
@@ -90,7 +93,7 @@ static int socket_cb(CURL* handle, curl_socket_t socket, int what, void *cb_data
 }
 
 static int timer_cb(CURLM* multi_handle, long timeout, void* cb_data) {
-	struct WebUpdater * updater = (struct WebUpdater *) cb_data;
+	struct WebUpdater * updater = &((Updater_t) cb_data)->data.data.web;
 
 	if (timeout == -1) {
 		// Get rid of timeout
@@ -128,9 +131,9 @@ Updater_t createWebUpdater(char const * template, int * timeout) {
 	updater->url_len = url_len;
 
 	if ((updater->multi_handle = curl_multi_init()) == NULL) goto cleanup;
-	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_SOCKETDATA, updater) != CURLM_OK) goto cleanup;
+	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_SOCKETDATA, data) != CURLM_OK) goto cleanup;
 	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_SOCKETFUNCTION, socket_cb) != CURLM_OK) goto cleanup;
-	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_TIMERDATA, updater) != CURLM_OK) goto cleanup;
+	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_TIMERDATA, data) != CURLM_OK) goto cleanup;
 	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb) != CURLM_OK) goto cleanup;
 
 	if ((updater->handle = curl_easy_init()) == NULL) goto cleanup;
