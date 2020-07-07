@@ -58,7 +58,7 @@ cleanup:
 	return -1;
 }
 
-static bool requestAddr(struct AddrFilter const * filter, ssize_t const sock){
+static int requestAddr(struct AddrFilter const * filter, ssize_t const sock){
 	unsigned char af =
 		(filter->ipv4 && !filter->ipv6) ? AF_INET
 		: (filter->ipv6 && !filter->ipv4) ? AF_INET6
@@ -80,11 +80,11 @@ static bool requestAddr(struct AddrFilter const * filter, ssize_t const sock){
 		},
 	};
 
-	if (send(sock, &req, req.nlh.nlmsg_len, 0) < 0){
-		return false;
+	if (send(sock, &req, req.nlh.nlmsg_len, 0) >= 0) {
+		return 0;
+	} else {
+		return -1;
 	}
-
-	return true;
 }
 
 Monitor_t createMonitor(struct AddrFilter const filter, size_t buf_len, int epoll_fd, Updater_t updater) {
@@ -121,7 +121,7 @@ Monitor_t createMonitor(struct AddrFilter const filter, size_t buf_len, int epol
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, data->socket, &event) == -1) goto cleanup;
 	monitor->epoll_fd = epoll_fd;
 
-	if (!requestAddr(&filter, data->socket)) goto cleanup;
+	if (requestAddr(&filter, data->socket) != 0) goto cleanup;
 
 	return data;
 cleanup:
@@ -164,10 +164,8 @@ int processMessage(Monitor_t data) {
 		monitor->buf_len = (size_t) len;
 
 		// clear socket, else get EBUSY on requestAddr
-		while (recv(data->socket, monitor->buf, monitor->buf_len, MSG_DONTWAIT) != -1)
-			continue;
-		if (errno != EAGAIN && errno != EWOULDBLOCK)
-			return -1;
+		while (recv(data->socket, monitor->buf, monitor->buf_len, MSG_DONTWAIT) != -1) continue;
+		if (errno != EAGAIN && errno != EWOULDBLOCK) return -1;
 
 		// May have missed data, re-request
 		return requestAddr(&monitor->filter, data->socket);
