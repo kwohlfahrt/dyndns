@@ -4,7 +4,7 @@
 #include "filter.h"
 #include "updater.h"
 
-typedef struct EpollMonitor * Monitor_t;
+typedef struct Monitor * Monitor_t;
 Monitor_t createMonitor(struct AddrFilter const filter, size_t buf_len, int epoll_fd, Updater_t updater);
-int processMessage(Monitor_t epoll_monitor);
-void destroyMonitor(Monitor_t epoll_monitor);
+int processMessage(Monitor_t monitor, int fd, int32_t events);
+void destroyMonitor(Monitor_t monitor);

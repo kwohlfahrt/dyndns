@@ -67,15 +67,17 @@ static size_t discard(__attribute__((unused)) char *ptr,
 }
 
 static int socket_cb(CURL* handle, curl_socket_t socket, int what, void *cb_data, void * socket_data) {
-	struct WebUpdater * updater = &((Updater_t) cb_data)->data.data.web;
+	struct WebUpdater * updater = cb_data;
+	// TODO: cb_data->fd needs to be set to socket
 
 	if (what == CURL_POLL_REMOVE) {
+		free(socket_data);
 		return epoll_ctl(updater->epoll_fd, EPOLL_CTL_DEL, socket, NULL);
 	} else {
 		struct epoll_event ev = {
 			.events = 0,
-			.data.ptr = cb_data,
 		};
+
 		if (what == CURL_POLL_IN || what == CURL_POLL_INOUT) {
 			ev.events |= EPOLLIN;
 		}
@@ -84,16 +86,23 @@ static int socket_cb(CURL* handle, curl_socket_t socket, int what, void *cb_data
 		}
 
 		if (socket_data == NULL) {
-			if (curl_multi_assign(updater->multi_handle, socket, updater) != CURLM_OK) return -1;
+			struct EpollData * data = malloc(sizeof(*data));
+			data->tag = EPOLL_WEB_UPDATER;
+			data->fd = socket;
+			data->web_updater = updater;
+			if (curl_multi_assign(updater->multi_handle, socket, data) != CURLM_OK) return -1;
+
+			ev.data.ptr = data;
 			return epoll_ctl(updater->epoll_fd, EPOLL_CTL_ADD, socket, &ev);
 		} else {
+			ev.data.ptr = socket_data;
 			return epoll_ctl(updater->epoll_fd, EPOLL_CTL_MOD, socket, &ev);
 		}
 	};
 }
 
 static int timer_cb(CURLM* multi_handle, long timeout, void* cb_data) {
-	struct WebUpdater * updater = &((Updater_t) cb_data)->data.data.web;
+	struct WebUpdater * updater = cb_data;
 
 	if (timeout == -1) {
 		// Get rid of timeout
@@ -105,18 +114,17 @@ static int timer_cb(CURLM* multi_handle, long timeout, void* cb_data) {
 	return 0;
 }
 
-Updater_t createWebUpdater(char const * template, int * timeout) {
+Updater_t createWebUpdater(char const * template, int epoll_fd, int * timeout) {
 	Updater_t data = malloc(sizeof(*data));
-	data->tag = EPOLL_UPDATER;
-
-	data->data.tag = WEB_UPDATER;
-	struct WebUpdater * updater = &data->data.data.web;
+	data->tag = WEB_UPDATER;
+	struct WebUpdater * updater = &data->web;
 	updater->multi_handle = NULL;
 	updater->handle = NULL;
 	updater->url = NULL;
 	updater->template = template;
 	updater->timeout = timeout;
 	updater->n_active = 0;
+	updater->epoll_fd = epoll_fd;
 
 	size_t url_len = strlen(template) + 1;
 	char const * tag_pos = template;
@@ -131,9 +139,9 @@ Updater_t createWebUpdater(char const * template, int * timeout) {
 	updater->url_len = url_len;
 
 	if ((updater->multi_handle = curl_multi_init()) == NULL) goto cleanup;
-	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_SOCKETDATA, data) != CURLM_OK) goto cleanup;
+	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_SOCKETDATA, updater) != CURLM_OK) goto cleanup;
 	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_SOCKETFUNCTION, socket_cb) != CURLM_OK) goto cleanup;
-	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_TIMERDATA, data) != CURLM_OK) goto cleanup;
+	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_TIMERDATA, updater) != CURLM_OK) goto cleanup;
 	if (curl_multi_setopt(updater->multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb) != CURLM_OK) goto cleanup;
 
 	if ((updater->handle = curl_easy_init()) == NULL) goto cleanup;
@@ -189,12 +197,11 @@ int handleWebTimeout(struct WebUpdater * updater) {
 	return completeRequests(updater, CURL_SOCKET_TIMEOUT, 0);
 }
 
-int handleWebMessage(struct WebUpdater * updater, int fd, struct epoll_event * event) {
-	int events = 0;
-	if (event->events & EPOLLIN) {
+int handleWebMessage(struct WebUpdater * updater, int fd, int32_t events) {
+	if (events & EPOLLIN) {
 		events |= CURL_CSELECT_IN;
 	}
-	if (event->events & EPOLLOUT) {
+	if (events & EPOLLOUT) {
 		events |= CURL_CSELECT_OUT;
 	}
 	return completeRequests(updater, fd, events);

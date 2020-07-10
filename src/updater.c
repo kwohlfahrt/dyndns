@@ -4,49 +4,48 @@
 
 Updater_t createPrintUpdater() {
 	Updater_t updater = malloc(sizeof(*updater));
-	updater->tag = EPOLL_UPDATER;
-	updater->data.tag = PRINT_UPDATER;
+	updater->tag = PRINT_UPDATER;
 	return updater;
 }
 
 int update(Updater_t updater, struct IPAddr addr) {
-	switch (updater->data.tag) {
+	switch (updater->tag) {
 	case PRINT_UPDATER:
 		return printAddr(addr);
 	case WEB_UPDATER:
-		return webUpdate(&updater->data.data.web, addr);
+		return webUpdate(&updater->web, addr);
 	};
 	// Should be unreachable
 	return -2;
 }
 
-int handleMessage(Updater_t updater, struct epoll_event * ev) {
-	switch (updater->data.tag) {
+int handleMessage(Updater_t updater, int fd, int32_t events) {
+	switch (updater->tag) {
 	case PRINT_UPDATER:
 		return -2;
 	case WEB_UPDATER:
-		return handleWebMessage(&updater->data.data.web, updater->fd, ev);
+		return handleWebMessage(&updater->web, fd, events);
 	}
 	return -2;
 };
 
 int handleTimeout(Updater_t updater) {
-	switch (updater->data.tag) {
+	switch (updater->tag) {
 	case PRINT_UPDATER:
 		// Unreachable
 		return -2;
 	case WEB_UPDATER:
-		return handleWebTimeout(&updater->data.data.web);
+		return handleWebTimeout(&updater->web);
 	}
 	return -2;
 }
 
 void destroyUpdater(Updater_t updater) {
-	switch (updater->data.tag) {
+	switch (updater->tag) {
 	case PRINT_UPDATER:
 		break;
 	case WEB_UPDATER:
-		destroyWebUpdater(&updater->data.data.web);
+		destroyWebUpdater(&updater->web);
 		break;
 	};
 	free(updater);

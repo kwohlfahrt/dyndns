@@ -20,9 +20,9 @@ struct WebUpdater {
 
 void destroyWebUpdater(struct WebUpdater * updater);
 int webUpdate(struct WebUpdater * updater, struct IPAddr addr);
-int handleWebMessage(struct WebUpdater * updater, int fd, struct epoll_event * ev);
+int handleWebMessage(struct WebUpdater * updater, int fd, int32_t events);
 int handleWebTimeout(struct WebUpdater * updater);
 
 #include "updater.h"
 
-Updater_t createWebUpdater(char const * template, int * timeout);
+Updater_t createWebUpdater(char const * template, int epoll_fd, int * timeout);

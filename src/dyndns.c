@@ -90,25 +90,32 @@ int main(int const argc, char** argv) {
 	}
 
 	// Prepare updater, cleanup necessary if exiting after this point.
+	int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+	if (epoll_fd < 0) {
+		perror("Couldn't create epoll");
+		return EXIT_FAILURE;
+	}
+
 	switch ((argc - optind)){
 	case 1:
 		updater = createPrintUpdater();
 		puts("Printing addresses to stdout.");
 		break;
 	case 2:
-		updater = createWebUpdater(argv[optind + 1], &epoll_timeout);
+		updater = createWebUpdater(argv[optind + 1], epoll_fd, &epoll_timeout);
 		printf("Updating URL %s with addresses.", argv[optind + 1]);
 		puts("");
 		break;
 	default:
 		puts("Usage:\n");
 		printUsage();
+		close(epoll_fd);
 		return EXIT_USAGE;
 	}
 
 	if (updater == NULL) {
 		perror("Couldn't set up updating");
-		return EXIT_FAILURE;
+		goto cleanup_epoll;
 	}
 
 	char const * const iface_name = argv[optind];
@@ -126,16 +133,10 @@ int main(int const argc, char** argv) {
 		puts("");
 	}
 
-	int epoll_fd = epoll_create1(EPOLL_CLOEXEC);
-	if (epoll_fd < 0) {
-		perror("Couldn't create epoll");
-		goto cleanup_updater;
-	}
-
 	Monitor_t monitor = createMonitor(filter, 1024, epoll_fd, updater);
 	if (monitor == NULL) {
 		perror("Couldn't set up monitoring");
-		goto cleanup_epoll;
+		goto cleanup;
 	}
 
 #ifdef WITH_SYSTEMD
@@ -157,25 +158,30 @@ int main(int const argc, char** argv) {
 
 		for (int i = 0; i < nevents; i++) {
 			// Could pull the monitor/updater out of the epoll event, but we only have one so...
-			if (*(enum EpollTag*) events[i].data.ptr == EPOLL_MONITOR) {
-				if (processMessage(monitor) != 0) {
+			struct EpollData * data = events[i].data.ptr;
+
+			switch (data->tag) {
+			case EPOLL_MONITOR:
+				if (processMessage(monitor, data->fd, events[i].events) != 0) {
 					perror("Error processing message");
 					goto cleanup;
 				}
-			} else if (*(enum EpollTag*) events[i].data.ptr == EPOLL_UPDATER) {
-				if (handleMessage(updater, &events[i]) != 0) {
+				break;
+			case EPOLL_WEB_UPDATER:
+				if (handleMessage(updater, data->fd, events[i].events) != 0) {
 					perror("Error processing update");
 					goto cleanup;
 				}
+				break;
 			}
 		}
 	} while (true);
 
 cleanup:
 	destroyMonitor(monitor);
-cleanup_epoll:
-	close(epoll_fd);
 cleanup_updater:
 	destroyUpdater(updater);
+cleanup_epoll:
+	close(epoll_fd);
 	return EXIT_FAILURE;
 }

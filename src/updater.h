@@ -1,9 +1,8 @@
 #pragma once
 
-typedef struct EpollUpdater * Updater_t;
+typedef struct Updater * Updater_t;
 
 #include <sys/epoll.h>
-#include "util.h"
 #include "ipaddr.h"
 #include "web_updater.h"
 
@@ -19,18 +18,12 @@ struct Updater {
 	union {
 		struct WebUpdater web;
 		struct PrintUpdater print;
-	} data;
-};
-
-struct EpollUpdater {
-	enum EpollTag tag;
-	int fd;
-	struct Updater data;
+	};
 };
 
 Updater_t createPrintUpdater();
 int update(Updater_t updater, struct IPAddr addr);
-int handleMessage(Updater_t updater, struct epoll_event * ev);
+int handleMessage(Updater_t updater, int fd, int32_t events);
 int handleTimeout(Updater_t updater);
 
 void destroyUpdater(Updater_t updater);
