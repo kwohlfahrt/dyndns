@@ -102,7 +102,9 @@ int main(int const argc, char** argv) {
 		puts("Printing addresses to stdout.");
 		break;
 	case 2:
-		updater = createWebUpdater(argv[optind + 1], epoll_fd, &epoll_timeout);
+		updater = createWebUpdater(
+			argv[optind + 1], epoll_fd, &epoll_timeout, (struct WebUpdaterOptions) { .verbose = verbosity }
+		);
 		printf("Updating URL %s with addresses.", argv[optind + 1]);
 		puts("");
 		break;

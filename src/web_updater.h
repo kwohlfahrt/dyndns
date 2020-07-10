@@ -4,10 +4,15 @@
 #include <sys/epoll.h>
 #include "ipaddr.h"
 
+struct WebUpdaterOptions {
+	bool verbose;
+};
+
 struct WebUpdater {
 	CURLM* multi_handle;
 	CURL* handle;
 	int n_active;
+	struct WebUpdaterOptions options;
 
 	int epoll_fd;
 
@@ -25,4 +30,4 @@ int handleWebTimeout(struct WebUpdater * updater);
 
 #include "updater.h"
 
-Updater_t createWebUpdater(char const * template, int epoll_fd, int * timeout);
+Updater_t createWebUpdater(char const * template, int epoll_fd, int * timeout, struct WebUpdaterOptions options);

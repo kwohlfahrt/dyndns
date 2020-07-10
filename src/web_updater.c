@@ -66,6 +66,10 @@ static size_t discard(__attribute__((unused)) char *ptr,
 	return size * nmemb;
 }
 
+static size_t print(char *ptr, size_t size, size_t nmemb, __attribute__((unused)) void *userdata){
+	return fwrite(ptr, size, nmemb, stdout);
+}
+
 static int socket_cb(CURL* handle, curl_socket_t socket, int what, void *cb_data, void * socket_data) {
 	struct WebUpdater * updater = cb_data;
 	// TODO: cb_data->fd needs to be set to socket
@@ -114,7 +118,7 @@ static int timer_cb(CURLM* multi_handle, long timeout, void* cb_data) {
 	return 0;
 }
 
-Updater_t createWebUpdater(char const * template, int epoll_fd, int * timeout) {
+Updater_t createWebUpdater(char const * template, int epoll_fd, int * timeout, struct WebUpdaterOptions options) {
 	Updater_t data = malloc(sizeof(*data));
 	data->tag = WEB_UPDATER;
 	struct WebUpdater * updater = &data->web;
@@ -125,6 +129,7 @@ Updater_t createWebUpdater(char const * template, int epoll_fd, int * timeout) {
 	updater->timeout = timeout;
 	updater->n_active = 0;
 	updater->epoll_fd = epoll_fd;
+	updater->options = options;
 
 	size_t url_len = strlen(template) + 1;
 	char const * tag_pos = template;
@@ -212,7 +217,7 @@ int webUpdate(struct WebUpdater * updater, struct IPAddr const addr){
 	if (updater->n_active > 0) {
 		curl_multi_remove_handle(updater->multi_handle, updater->handle);
 	}
-	if (curl_easy_setopt(updater->handle, CURLOPT_WRITEFUNCTION, discard) != CURLE_OK) return -1;
+	if (curl_easy_setopt(updater->handle, CURLOPT_WRITEFUNCTION, updater->options.verbose ? print : discard) != CURLE_OK) return -1;
 	if (curl_easy_setopt(updater->handle, CURLOPT_URL, updater->url) != CURLE_OK) return -1;
 	if (curl_multi_add_handle(updater->multi_handle, updater->handle) != CURLM_OK) return -1;
 	printf("Fetching address: %s\n", updater->url);
