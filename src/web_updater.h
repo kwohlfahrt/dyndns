@@ -1,9 +1,33 @@
-#ifndef _WEB_UPDATER_H
-#define _WEB_UPDATER_H
+#pragma once
 
+#include <curl/curl.h>
+#include <sys/epoll.h>
 #include "ipaddr.h"
 
-void setUrl(char const * const new_url);
-int webUpdate(struct IPAddr const addr);
+struct WebUpdaterOptions {
+	bool verbose;
+};
 
-#endif /*_WEB_UPDATER_H*/
+struct WebUpdater {
+	CURLM* multi_handle;
+	CURL* handle;
+	int n_active;
+	struct WebUpdaterOptions options;
+
+	int epoll_fd;
+
+	char const* template;
+	char* url;
+	size_t url_len;
+
+	int* timeout;
+};
+
+void destroyWebUpdater(struct WebUpdater * updater);
+int webUpdate(struct WebUpdater * updater, struct IPAddr addr);
+int handleWebMessage(struct WebUpdater * updater, int fd, int32_t events);
+int handleWebTimeout(struct WebUpdater * updater);
+
+#include "updater.h"
+
+Updater_t createWebUpdater(char const * template, int epoll_fd, int * timeout, struct WebUpdaterOptions options);

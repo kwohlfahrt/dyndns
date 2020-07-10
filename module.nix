@@ -37,6 +37,13 @@ in {
         Whether to update when a private-range IP address is detected.
       '';
     };
+    allow_temporary = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Whether to update when a temporary IP address is detected.
+      '';
+    };
   };
 
   config = mkIf cfg.enable {
@@ -50,7 +57,9 @@ in {
         Type = "notify";
         ExecStart = let
           flags = lib.concatStringsSep " "
-            (["-${cfg.class or "46"}"] ++ lib.optional cfg.allow_private "--allow-private");
+            (["-${cfg.class or "46"}"]
+             ++ lib.optional cfg.allow_private "--allow-private"
+             ++ lib.optional cfg.allow_temporary "--allow-temporary");
           in "${pkgs.dyndns}/bin/dyndns ${flags} ${cfg.interface} ${cfg.url}";
       };
     };
