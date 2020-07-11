@@ -5,16 +5,13 @@
 #ifndef SOL_NETLINK
 #define SOL_NETLINK 270
 #endif /*SOL_NETLINK*/
-#include <stddef.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
-#include <sys/types.h>
 #include <sys/epoll.h>
 #include <errno.h>
 
 #include "monitor.h"
-#include "filter.h"
 #include "ipaddr.h"
 #include "util.h"
 

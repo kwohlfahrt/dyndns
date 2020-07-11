@@ -1,7 +1,10 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+
 #include <curl/curl.h>
-#include <sys/epoll.h>
 #include "ipaddr.h"
 
 struct WebUpdaterOptions {

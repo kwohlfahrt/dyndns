@@ -1,10 +1,7 @@
 #pragma once
 
-#include <linux/rtnetlink.h>
+#include <linux/netlink.h>
 #include <stdbool.h>
-#include <stddef.h>
-
-#include "ipaddr.h"
 
 struct AddrFilter {
 	unsigned int iface;

@@ -1,7 +1,4 @@
-#include <stdbool.h>
 #include <stdlib.h>
-#include <stddef.h>
-#include <unistd.h>
 #include <errno.h>
 
 #include <string.h>
@@ -10,17 +7,11 @@
 #define HAVE_strlcpy
 #endif
 
-#include <curl/curl.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/inotify.h>
 #include <sys/epoll.h>
-#include <sys/select.h>
 
 #include "web_updater.h"
-#include "ipaddr.h"
-#include "filter.h"
 #include "util.h"
 
 char const * const ip_tag = "<ipaddr>";

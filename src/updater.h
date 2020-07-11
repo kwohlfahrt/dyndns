@@ -2,7 +2,7 @@
 
 typedef struct Updater * Updater_t;
 
-#include <sys/epoll.h>
+#include <stdint.h>
 #include "ipaddr.h"
 #include "web_updater.h"
 

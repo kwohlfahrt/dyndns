@@ -1,8 +1,7 @@
 #include "ipaddr.h"
-#include <stdbool.h>
+#include <stdint.h>
 #include <errno.h>
 #include <sys/socket.h>
-#include <stddef.h>
 #include <arpa/inet.h>
 
 #include <stdio.h>

@@ -6,14 +6,11 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include <sys/socket.h>
 #include <sys/epoll.h>
 #include <net/if.h>
-#include <signal.h>
 
 #include "util.h"
 #include "filter.h"
-#include "ipaddr.h"
 #include "monitor.h"
 #include "web_updater.h"
 #include "updater.h"

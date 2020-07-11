@@ -1,6 +1,11 @@
 #include "filter.h"
 #include "ipaddr.h"
-#include <stdio.h>
+
+#include <stdint.h>
+#include <stddef.h>
+#include <sys/socket.h>
+#include <linux/if_addr.h>
+#include <linux/rtnetlink.h>
 
 struct rtattr* filterMessage(struct AddrFilter const * filter, struct nlmsghdr const * nlh){
 	struct ifaddrmsg * ifa = (struct ifaddrmsg *) NLMSG_DATA(nlh);

@@ -3,7 +3,6 @@
 #define NELEMS(x) (sizeof(x) / sizeof(*x))
 
 #include "monitor.h"
-#include "web_updater.h"
 
 
 enum EpollTag {
