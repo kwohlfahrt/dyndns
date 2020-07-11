@@ -16,7 +16,4 @@ struct AddrFilter {
 	bool ipv6;
 };
 
-bool filterMessage(struct AddrFilter const * filter, struct ifaddrmsg const * msg);
-bool filterAttr(struct AddrFilter const * filter,
-		struct ifaddrmsg const * msg,
-		struct rtattr const * attr);
+struct rtattr* filterMessage(struct AddrFilter const * filter, struct nlmsghdr const * nlh);

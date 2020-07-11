@@ -27,6 +27,7 @@ struct Monitor {
 	int epoll_fd;
 	struct EpollData epoll_data;
 
+	struct IPAddr prev_addr;
 	Updater_t updater;
 };
 
@@ -88,6 +89,7 @@ Monitor_t createMonitor(struct AddrFilter const filter, size_t buf_len, int epol
 	struct Monitor * monitor = malloc(sizeof(*monitor));
 	monitor->updater = updater;
 	monitor->epoll_fd = -1;
+	monitor->prev_addr.af = AF_UNSPEC;
 
 	monitor->socket = createSocket();
 	if (monitor->socket == -1) goto cleanup;
@@ -144,6 +146,20 @@ void destroyMonitor(Monitor_t monitor) {
 	return;
 }
 
+static int processAddr(Monitor_t monitor, struct nlmsghdr * nlh) {
+	struct ifaddrmsg * ifa = (struct ifaddrmsg *) NLMSG_DATA(nlh);
+	struct rtattr * addr_attr = filterMessage(&monitor->filter, nlh);
+	if (addr_attr == NULL) return 0;
+
+	struct IPAddr addr = addrFromAttr(ifa, addr_attr);
+	if (addrEqual(monitor->prev_addr, addr)) return 0;
+
+	int result = update(monitor->updater, addr);
+	if (result != 0) return result;
+	monitor->prev_addr = addr;
+	return 0;
+}
+
 int processMessage(Monitor_t monitor, int fd, int32_t events) {
 	ssize_t len = recv(fd, monitor->buf, monitor->buf_len, MSG_TRUNC);
 	if (len == -1) {
@@ -175,19 +191,9 @@ int processMessage(Monitor_t monitor, int fd, int32_t events) {
 			errno = -((struct nlmsgerr *) NLMSG_DATA(nlh))->error;
 			return  -1;
 		case RTM_NEWADDR: {
-			struct ifaddrmsg * ifa = (struct ifaddrmsg *) NLMSG_DATA(nlh);
-			if (!filterMessage(&monitor->filter, ifa)) break;
-
-			struct rtattr * rth;
-			size_t rtmsg_len;
-			for (rth = IFA_RTA(ifa), rtmsg_len = IFA_PAYLOAD(nlh);
-			     RTA_OK(rth, rtmsg_len);
-			     RTA_NEXT(rth, rtmsg_len)) {
-				if (!filterAttr(&monitor->filter, ifa, rth)) continue;
-				struct IPAddr addr = addrFromAttr(ifa, rth);
-				int result = update(monitor->updater, addr);
-				if (result != 0) return result;
-			}
+			int result = processAddr(monitor, nlh);
+			if (result != 0) return result;
+			break;
 		}}
 	}
 
